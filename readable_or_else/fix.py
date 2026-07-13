@@ -20,9 +20,10 @@ cost-conscious by design, not a loop until something sticks.
 
 from dataclasses import dataclass
 
-from .denial_rules import DenialConfig, run_denial_rules
-from .llm import DEFAULT_SYSTEM_PROMPT, LLMClient, RewriteUnavailable
+from .denial_rules import DenialConfig, rule_placeholder_preserved, run_denial_rules
+from .llm import DEFAULT_SYSTEM_PROMPT, MIXED_CONTENT_SYSTEM_PROMPT, LLMClient, RewriteUnavailable
 from .measure import measure
+from .mixed_content import MixedContentPassage, dehydrate
 
 RETRY_FEEDBACK = (
     "\n\nYour previous attempt was rejected by the '{rule}' rule: {detail}. "
@@ -114,6 +115,117 @@ def attempt_fix(
         before_grade=before.grade,
         after_grade=after.grade if after else None,
     )
+
+
+def attempt_fix_mixed(
+    passage: MixedContentPassage,
+    target_grade: float,
+    language: str,
+    client: LLMClient,
+    denial_config: DenialConfig | None = None,
+    max_retries: int = 1,
+    tag: str | None = None,
+) -> tuple[PassageFixResult, str | None]:
+    """Fix mode for a passage that contains inline markup (mixed_content.py).
+
+    Same retry-with-feedback shape as `attempt_fix`, but the LLM sees and
+    returns placeholder-bearing text, not plain prose. Candidates are
+    validated in two stages: `rule_placeholder_preserved` on the raw
+    placeholder text first (a candidate that fails this can't be safely
+    dehydrated or reassembled at all), then the usual grade/meaning/length/
+    markup rules on the dehydrated prose.
+
+    Returns (result, raw_candidate). `raw_candidate` is the accepted
+    placeholder-bearing text — apply.py's caller needs it, not the dehydrated
+    prose in `result.candidate_text`, to splice the original inline Tag
+    objects back into the DOM — and is None whenever `result.applied` is
+    False.
+    """
+    denial_config = denial_config or DenialConfig()
+    before = measure(passage.dehydrated_text, language=language)
+
+    if passage.inline_ratio >= denial_config.inline_dominant_ratio:
+        return PassageFixResult(
+            tag=tag,
+            original_text=passage.dehydrated_text,
+            candidate_text=None,
+            applied=False,
+            rule="inline_dominant",
+            reason=(
+                f"inline elements make up {passage.inline_ratio:.0%} of this passage's "
+                f"text (threshold {denial_config.inline_dominant_ratio:.0%}) — rewriting "
+                "prose around them was not attempted"
+            ),
+            attempts=0,
+            before_grade=before.grade,
+        ), None
+
+    base_system = MIXED_CONTENT_SYSTEM_PROMPT.format(target_grade=target_grade, language=language)
+    system = base_system
+    max_attempts = max(1, max_retries + 1)
+
+    raw_candidate = None
+    dehydrated_candidate = None
+    outcome = None
+    attempts = 0
+
+    for attempt_num in range(max_attempts):
+        attempts = attempt_num + 1
+        try:
+            raw_candidate = client.complete(system, passage.placeholder_text)
+        except RewriteUnavailable as exc:
+            return PassageFixResult(
+                tag=tag,
+                original_text=passage.dehydrated_text,
+                candidate_text=None,
+                applied=False,
+                rule="llm_unavailable",
+                reason=str(exc),
+                attempts=attempts,
+                before_grade=before.grade,
+            ), None
+
+        outcome = rule_placeholder_preserved(passage.placeholder_text, raw_candidate)
+        dehydrated_candidate = None
+        if not outcome.denied:
+            dehydrated_candidate = dehydrate(raw_candidate, passage.nodes)
+            outcome = run_denial_rules(
+                passage.dehydrated_text, dehydrated_candidate,
+                target_grade=target_grade, language=language, config=denial_config,
+            )
+
+        if not outcome.denied:
+            after = measure(dehydrated_candidate, language=language)
+            return PassageFixResult(
+                tag=tag,
+                original_text=passage.dehydrated_text,
+                candidate_text=dehydrated_candidate,
+                applied=True,
+                rule="",
+                reason=(
+                    f"grade {after.grade:.2f} meets target {target_grade}; "
+                    "all denial rules passed"
+                ),
+                attempts=attempts,
+                before_grade=before.grade,
+                after_grade=after.grade,
+            ), raw_candidate
+
+        if attempt_num < max_attempts - 1:
+            system = base_system + RETRY_FEEDBACK.format(rule=outcome.rule, detail=outcome.detail)
+
+    after_grade = measure(dehydrated_candidate, language=language).grade if dehydrated_candidate else None
+    return PassageFixResult(
+        tag=tag,
+        original_text=passage.dehydrated_text,
+        candidate_text=dehydrated_candidate if dehydrated_candidate is not None else raw_candidate,
+        applied=False,
+        rule=outcome.rule,
+        reason=outcome.detail,
+        attempts=attempts,
+        before_grade=before.grade,
+        after_grade=after_grade,
+    ), None
 
 
 @dataclass

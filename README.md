@@ -198,14 +198,24 @@ export READABLE_OR_ELSE_LLM_MODEL="gpt-4o-mini"
 readable-or-else fix about.html data.html --preset nycsg7
 ```
 
-For each file, `fix` finds every *leaf text element* (a `<p>`, `<li>`,
-heading, table cell, etc. whose entire content is text — no nested tags)
-that measures over the preset's target grade, asks the configured LLM for a
-rewrite, runs the candidate through the denial rules below, and — only if it
-clears all of them — replaces that element's text content in place. Exit
-code is `1` if any passage was left over-target (denied, or structurally
-ineligible), `0` otherwise, mirroring `check`'s gate semantics so `fix` slots
-into the same CI step.
+For each file, `fix` finds every *leaf block element* (a `<p>`, `<li>`,
+heading, table cell, etc.) that measures over the preset's target grade,
+asks the configured LLM for a rewrite, runs the candidate through the denial
+rules below, and — only if it clears all of them — replaces that element's
+content in place. Exit code is `1` if any passage was left over-target
+(denied, or structurally ineligible), `0` otherwise, mirroring `check`'s
+gate semantics so `fix` slots into the same CI step.
+
+Two passage shapes are handled. A *pure leaf* (no nested tags at all) is
+rewritten as plain text. A *mixed-content* leaf — text plus supported inline
+tags like `<a>`, `<b>`, `<em>` — is rewritten too: each inline element
+becomes an opaque placeholder token (`[LINK1:the payment portal]`) the LLM
+must keep exactly once, anywhere in the sentence, without touching what's
+inside the brackets; a passing candidate is reassembled using the *original*
+tag objects, so an anchor's `href` and every other attribute survive
+untouched. This is what lets `fix` reach the common civic-page paragraph
+that has a citation or "see also" link in the middle of otherwise-plain
+prose — see "Mixed-content rewriting" below.
 
 **Why this is opt-in, not the default:** a denial rule you haven't yet
 watched fire on your own prose is a rule you're trusting blind. `check`
@@ -228,14 +238,21 @@ order — the first one it fails is the one reported:
 | `markup_integrity` | Candidate must not contain a raw `<` or `>`. | An LLM hallucinating HTML into its output would otherwise get spliced into a text node verbatim. |
 | *(extra, configurable)* | Any caller-supplied `DenialConfig(extra_denials=[...])` callables — house style rules, banned phrases, whatever your content needs. | v1 exposes this at the library level only; the CLI doesn't yet load custom rules from a config file. |
 
-**Link anchors are preserved structurally, not by a text check.** A leaf
-element that contains any nested tag at all — most commonly a `<a>` — is
-never a rewrite candidate in the first place, so an anchor's visible link
-text is never at risk. This also means `fix` never attempts to rewrite a
-paragraph that contains an inline link, a `<strong>`, or any other inline
-markup — v1 has no safe way to re-splice a partial rewrite around inline
-tags without risking the "never break markup" guarantee, so those passages
-are left untouched (reported as skipped) rather than guessed at.
+For a mixed-content passage, a sixth rule runs first, on the raw
+placeholder-bearing text rather than dehydrated prose:
+
+| Rule | What it checks | Why |
+|---|---|---|
+| `placeholder_preserved` | Every `[LABEL#:text]` token in the original must appear in the candidate exactly once, byte-for-byte — order may change, content may not. | Subsumes link-anchor preservation for this path: a candidate that drops, duplicates, or edits a token never reaches the five prose rules above, let alone the DOM. |
+
+**Link anchors are preserved two ways depending on shape.** A *pure* leaf
+(no nested tags) is never a rewrite candidate to begin with, so its text is
+never at risk. A *mixed-content* leaf's anchors are preserved structurally
+by reassembly: a placeholder token can only resolve to its original `<a>`
+Tag object once `placeholder_preserved` has already confirmed that token —
+label, index, and inner text — is unchanged from extraction, and reassembly
+always re-uses that same object (never rebuilds one from the candidate's
+text), so its `href` and every other attribute are untouched by construction.
 
 **Retry-with-feedback.** A denial names a specific rule and reason — exactly
 what a second LLM attempt needs. On denial, `fix` makes one bounded retry
@@ -247,6 +264,25 @@ call per failing passage, not a loop until something sticks.
 is lost. The file keeps failing `check` as it did before, and the report
 names which rule denied it, so a human reviewing the PR sees the same
 information `--suggest` would have shown.
+
+### Mixed-content rewriting: honest limits
+
+Not every element with inline markup is eligible. `serialize_mixed_content`
+(`readable_or_else/mixed_content.py`) declines, and the passage falls back to
+"skip it, count it, never call the LLM" — the same as a fully unsupported
+element:
+
+- **Nested inline-in-inline** (`<a><b>text</b></a>`, or a `<b>` that itself
+  wraps an `<a>`) — only one level of inline nesting is modeled.
+- **`<code>` and similar** — a code span is content to preserve exactly, not
+  prose to restructure around; asking an LLM to write around one invites it
+  to "helpfully" reword what's inside despite instructions not to.
+- **An inline element whose inner text contains `[` or `]`** — would break
+  placeholder-token parsing on the round trip.
+- **`inline_dominant`** — a passage where the inline elements ARE most of the
+  sentence (`--inline-dominant-ratio`, default `0.5`) is denied without ever
+  calling the LLM: restructuring prose around a placeholder that's most of
+  the text isn't a rewrite, it's a coin flip.
 
 ### The maintenance loop in CI
 
@@ -310,10 +346,13 @@ own reviewable PR instead of amending the triggering one.
   page today.
 - **Rewrite suggestions are heuristically checked, not semantically
   verified.** See above.
-- **`fix` only touches leaf text elements with no nested markup.** A
-  paragraph containing a link, a `<strong>`, or any other inline tag is
-  skipped rather than partially rewritten — see "Fix mode" above for why.
-  A whole-file `.txt` input is treated as a single passage, same as `check`.
+- **`fix` reaches leaf elements with a bounded set of inline tags** (`<a>`,
+  `<b>`/`<strong>`, `<em>`/`<i>`, `<span>`, and a few others — see
+  `mixed_content.INLINE_TAGS`), not markup in general. Nested inline-in-inline,
+  `<code>`, and a few other shapes are still skipped rather than partially
+  rewritten — see "Mixed-content rewriting: honest limits" above for the
+  full list. A whole-file `.txt` input is treated as a single passage, same
+  as `check`.
 - **`fix`'s extra denial rules are library-only in v1.** `DenialConfig(extra_denials=[...])`
   works when calling `readable_or_else` as a library; the CLI doesn't yet
   load custom denial callables from a config file.

@@ -125,6 +125,40 @@ call the GitHub API works — this repo doesn't ship one, to stay
 CI-provider-agnostic). Never wire this to auto-commit the rewrite; a human
 must accept the diff.
 
+## 6. Mixed-content rewriting closes most of the earlier eligibility gap
+
+The first production run of `fix`/`--suggest` against crol-list (PR #17)
+found that most of its over-target prose was structurally ineligible: `fix`
+v1 only ever considered a *pure* leaf element (no nested tags at all) a
+rewrite candidate, and real civic-page paragraphs routinely carry at least
+one inline `<a>`, `<b>`, or `<em>` — a citation, a "see also," a payment
+link.
+
+readable-or-else 0.2.0 adds mixed-content rewriting (see the main README's
+"Mixed-content rewriting: honest limits" section): a leaf element with
+supported inline tags is now itself an eligible passage, rewritten around
+placeholder tokens that stand in for its inline children and reassembled
+using the *original* tag objects, so link `href`s and other attributes never
+change. Re-measuring all 104 currently-over-target passages across
+crol-list's six pages (`about.html`, `api.html`, `data.html`,
+`changelog.html`, `stats.html`, `index.html`) against this version:
+
+| | count |
+|---|---|
+| Over-target passages, total | 104 |
+| Eligible before (pure leaf only) | 42 |
+| Newly eligible now (mixed-content) | 25 |
+| `inline_dominant` (denied without an LLM call — inline text is most of the sentence) | 1 |
+| Still skipped (`<code>` spans, nested inline-in-inline, `data-i18n` `<span>` chrome) | 36 |
+
+So this re-run reaches **67 of 104** over-target passages (up from 42),
+mostly by picking up paragraphs with a single inline link. The remaining 36
+are concentrated in `api.html`/`changelog.html`'s `<code>`-heavy technical
+prose (an honest limit, not a bug — see the README) and `index.html`'s
+`data-i18n`-wrapped `<span>` chrome (nested `<span>`-in-`<span>`, also out of
+scope for v1's one-level inline model). Re-run `fix --preset nycsg7` after
+upgrading to pick these up; nothing else in this drop-in changes.
+
 ## What's explicitly out of scope here
 
 Per the design report's build/wrap/skip verdict (§3): link-text linting and
