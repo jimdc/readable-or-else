@@ -189,7 +189,7 @@ fake client (`tests/fakes.py`); no test makes a live network call.
 
 reading-gate was scoped against crol-list's own pages as its first real
 corpus. See
-[`data/reading-gate-b1/crol-integration.md`](data/reading-gate-b1/crol-integration.md)
+[`docs/consumers/crol-list.md`](docs/consumers/crol-list.md)
 for the exact drop-in: ratchet mode across its six pages, the `nycsg7`
 preset, and a ready-to-paste CI job.
 

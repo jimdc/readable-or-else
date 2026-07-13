@@ -7,7 +7,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - **Measurement math is wrapped, never reimplemented.** `reading_gate/measure.py` is a thin wrapper over `textstat`. If a formula looks wrong, the fix is almost never in this repo — check `textstat`'s issue tracker first.
 - **Presets are data, not code** (`reading_gate/presets.py`) — each one carries its citation inline. Adding a preset means adding a `Preset(...)` entry with a real source, not writing new gating logic.
 - **`--extract dom-rendered` is a v1 stub** (`reading_gate/extract.py::extract_dom_rendered`) — raises `DomRenderedNotImplemented`. SPA-rendered content needs a real DOM walk (e.g. Playwright); not built yet.
-- **crol-list is the reference consumer** — see `data/reading-gate-b1/crol-integration.md` for its exact ratchet-mode drop-in and baseline numbers at adoption time.
+- **crol-list is the reference consumer** — see `docs/consumers/crol-list.md` for its exact ratchet-mode drop-in and baseline numbers at adoption time.
 - **Design source**: this component's build/wrap scope decisions (why textstat, why ratchet mode, why English-only rewrite, why link-text/i18n linting are explicitly out of scope) come from a research report that lives outside this repo (an estate research artifact, not committed here) — if a scope question comes up ("should this also lint X"), the answer is almost always "no, that's a different rule family," and this file should be updated with the reasoning if it recurs.
 
 ## Maintaining this file
