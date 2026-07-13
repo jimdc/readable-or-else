@@ -1,0 +1,315 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Live Rewrite Showcase: crol-list &middot; readable-or-else</title>
+<meta name="description" content="readable-or-else measured and rewrote crol-list's genuinely-hard prose against the NYC Web Content Style Guide's grade-7 reading level rule &mdash; real LLM calls, re-measured, honestly reported.">
+<style>
+:root{
+  --paper:#f7f4ec; --ink:#20201c; --ink-soft:#4a463d; --muted:#6b6558;
+  --rule:#ddd4c0; --card:#fffdf7; --accent:#1f4d3a; --accent-2:#8a3324;
+  --red:#a3311f; --red-bg:#fbeae6; --green:#1f6b45; --green-bg:#e9f4ec;
+  --amber:#8a5a10; --amber-bg:#fbf1de;
+  --font-serif:Georgia,'Iowan Old Style','Palatino Linotype',serif;
+  --font-sans:-apple-system,BlinkMacSystemFont,'Segoe UI',ui-sans-serif,system-ui,sans-serif;
+  --font-mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.6 var(--font-serif);-webkit-font-smoothing:antialiased}
+.wrap{max-width:840px;margin:0 auto;padding:0 24px 96px}
+a{color:var(--accent-2)}
+a:hover{text-decoration:underline}
+header{padding-top:40px}
+.kicker{font:700 12px/1 var(--font-sans);letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+h1{font-family:var(--font-serif);font-weight:700;font-size:clamp(1.8rem,5vw,2.6rem);line-height:1.08;margin:0 0 14px}
+.dek{font-size:1.05rem;color:var(--ink-soft);margin:0 0 6px;max-width:66ch}
+.nav{margin:18px 0 8px;font:600 13px/1 var(--font-sans)}
+.nav a{text-decoration:none}
+.rule{border:0;border-top:2px solid var(--ink);margin:22px 0}
+.rule--light{border-top:1px solid var(--rule)}
+h2{font:700 1.15rem/1.3 var(--font-serif);color:var(--accent);margin:40px 0 6px;padding-top:20px;border-top:1px solid var(--rule)}
+h2 .n{color:var(--muted);font-weight:400;font-size:.85em}
+.lede-box{background:var(--card);border:1px solid var(--rule);border-radius:10px;padding:18px 20px;margin:18px 0;font:15px/1.65 var(--font-sans);color:var(--ink-soft)}
+.lede-box b{color:var(--ink)}
+blockquote.std{margin:14px 0;padding:12px 16px;border-left:3px solid var(--accent);background:var(--card);font:15px/1.6 var(--font-sans);color:var(--ink-soft)}
+blockquote.std cite{display:block;margin-top:6px;font-size:12.5px;color:var(--muted);font-style:normal}
+.presetgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:18px 0}
+.presetcard{background:var(--card);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;font:13.5px/1.55 var(--font-sans)}
+.presetcard .pname{font:700 13px/1 var(--font-sans);color:var(--accent);text-transform:none;margin-bottom:6px}
+.presetcard .ptarget{color:var(--muted)}
+.card{background:var(--card);border:1px solid var(--rule);border-radius:12px;padding:20px 22px;margin:18px 0}
+.card .src{font:600 12px/1 var(--font-sans);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin-bottom:12px}
+.pair{display:grid;grid-template-columns:1fr;gap:14px;margin-top:10px}
+@media(min-width:640px){.pair{grid-template-columns:1fr 1fr}}
+.block{border:1px solid var(--rule);border-radius:8px;padding:14px 16px;background:#fff}
+.block .lbl{display:flex;justify-content:space-between;align-items:center;font:700 11px/1 var(--font-sans);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+.block p{margin:0;font-size:16px;line-height:1.55}
+.grade{font:700 12px/1 var(--font-mono);padding:4px 9px;border-radius:999px;white-space:nowrap}
+.grade.bad{background:var(--red-bg);color:var(--red)}
+.grade.good{background:var(--green-bg);color:var(--green)}
+.grade.warn{background:var(--amber-bg);color:var(--amber)}
+.metarow{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.pill{font:700 11px/1 var(--font-sans);padding:6px 10px;border-radius:999px;letter-spacing:.02em}
+.pill.pass{background:var(--green-bg);color:var(--green)}
+.pill.fail{background:var(--red-bg);color:var(--red)}
+.pill.flag{background:var(--amber-bg);color:var(--amber)}
+.pill.neutral{background:var(--rule);color:var(--ink-soft)}
+.note{font:13px/1.6 var(--font-sans);color:var(--muted);margin-top:10px}
+.missing{font:12.5px/1.6 var(--font-mono);color:var(--red);margin-top:6px}
+.presetresults{display:grid;grid-template-columns:1fr;gap:12px;margin-top:12px}
+@media(min-width:760px){.presetresults{grid-template-columns:1fr 1fr 1fr}}
+.presetresult{border:1px solid var(--rule);border-radius:8px;padding:12px 14px;background:#fff}
+.presetresult .pn{font:700 12px/1 var(--font-sans);color:var(--accent);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+.presetresult .gr{display:flex;gap:6px;align-items:center;font:13px/1.4 var(--font-sans);color:var(--ink-soft);margin-bottom:8px}
+.presetresult p{font-size:14.5px;line-height:1.5;margin:0}
+.presetresult .rewritetext{margin-top:8px;padding-top:8px;border-top:1px dashed var(--rule)}
+.foot{margin-top:56px;border-top:2px solid var(--ink);padding-top:18px;font:13.5px/1.65 var(--font-sans);color:var(--muted)}
+.foot b{color:var(--ink-soft)}
+.toc{font:14px/1.7 var(--font-sans);color:var(--ink-soft);margin:14px 0}
+.toc a{color:var(--accent-2);text-decoration:none}
+.toc a:hover{text-decoration:underline}
+code{font-family:var(--font-mono);font-size:.92em;background:var(--rule);padding:1px 5px;border-radius:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="nav"><a href="index.html">&larr; readable-or-else</a></div>
+  <div class="kicker">Live rewrite showcase</div>
+  <h1>crol-list, before &amp; after</h1>
+  <p class="dek">readable-or-else is a readability CI gate &mdash; a Flesch-Kincaid grade-level
+  check in CI that fails a pull request when a page misses its target reading level &mdash; plus an
+  LLM-backed mode that rewrites failing text to a target grade, re-measures the rewrite with the
+  same formula used for gating, and only surfaces it if it actually hits the target and preserves
+  the original's numbers, links, and named entities. Below are the ten genuinely-hardest passages
+  from <a href="https://github.com/jimdc/crol-list" target="_blank" rel="noopener">crol-list</a>&rsquo;s
+  <code>about.html</code> and <code>data.html</code> &mdash; crol-list's own reference pages, all
+  measuring Flesch-Kincaid grade 9 or higher &mdash; run through a real LLM rewrite call each, not
+  mocked or hand-edited.</p>
+  <blockquote class="std">
+    &ldquo;Always make your content as simple as you can without losing meaning. Try to simplify
+    your content to a seventh grade reading level or lower. We use the Flesch&ndash;Kincaid grade
+    level formula.&rdquo;
+    <cite>NYC Web Content Style Guide, &ldquo;Reading level&rdquo; &mdash;
+    <a href="https://designsystem.nyc.gov/standards/nyc-web-content-style-guide.html" target="_blank" rel="noopener">designsystem.nyc.gov/standards/nyc-web-content-style-guide.html</a>
+    &mdash; the <code>nycsg7</code> preset's source, target grade 7.</cite>
+  </blockquote>
+  <p class="dek">Result: <b>4 of 10</b> rewrite calls landed at or under grade 7 on the
+  first try and passed the entity-preservation check. The rest are shown too &mdash; a rewrite
+  that stays over target is a real, honestly-reported outcome, not a failure to hide. See
+  <a href="https://github.com/jimdc/readable-or-else" target="_blank" rel="noopener">readable-or-else on GitHub</a>.</p>
+</header>
+<hr class="rule">
+
+    <div class="card">
+      <div class="src">about.html &middot; What this is (mission statement)</div>
+      <div class="pair">
+        <div class="block">
+          <div class="lbl"><span>Original</span><span class="grade bad">grade 14.5</span></div>
+          <p>CROL-List is a search interface over The City Record — the City of New York&#x27;s official daily journal, where every agency must publish its contracts, hearings, rule changes, rezonings, and personnel moves. CROL-List makes that record searchable by interest: follow a contract, decode a job title, track a rezoning, or get an email when something new matches.</p>
+        </div>
+        <div class="block">
+          <div class="lbl"><span>Rewrite</span><span class="grade good">grade 6.9</span></div>
+          <p>CROL-List is a search tool for The City Record. The City Record is the official daily journal of the City of New York. Every agency must post its contracts, hearings, rule changes, rezonings, and staff changes there. CROL-List lets you search this record by topic. You can follow a contract, look up a job title, track a rezoning, or get an email when a new item matches what you care about.</p>
+        </div>
+      </div>
+      <div class="metarow">
+        <span class="pill pass">passes nycsg7</span>
+        <span class="pill pass">entity check: pass</span>
+      </div>
+      
+      <div class="note">grade 6.90 meets target 7.0; meaning check passed</div>
+    </div>
+
+    <div class="card">
+      <div class="src">about.html &middot; Flags &amp; context, explained (intro)</div>
+      <div class="pair">
+        <div class="block">
+          <div class="lbl"><span>Original</span><span class="grade bad">grade 15.9</span></div>
+          <p>Procurement notices carry two kinds of computed annotation. Both are statistical context, not findings or accusations — a flag means &quot;worth a closer look,&quot; and every formula has innocent explanations (emergencies are real, specialized markets have few bidders, name matching is imperfect). The approach follows the Open Contracting Partnership&#x27;s red-flags methodology and Opentender&#x27;s integrity indicators.</p>
+        </div>
+        <div class="block">
+          <div class="lbl"><span>Rewrite</span><span class="grade bad">grade 7.5</span></div>
+          <p>Procurement notices come with two kinds of computed notes. Both give statistical context. They are not findings or accusations. A flag just means &quot;worth a closer look.&quot; Every formula has innocent reasons behind it. Emergencies do happen. Specialized markets often have few bidders. Name matching is not perfect. This approach follows the red-flags method from the Open Contracting Partnership and the integrity signs used by Opentender.</p>
+        </div>
+      </div>
+      <div class="metarow">
+        <span class="pill fail">fails nycsg7</span>
+        <span class="pill pass">entity check: pass</span>
+      </div>
+      
+      <div class="note">candidate still over target: grade 7.47 &gt; target 7.0</div>
+    </div>
+
+    <div class="card">
+      <div class="src">about.html &middot; Flag: Context strip</div>
+      <div class="pair">
+        <div class="block">
+          <div class="lbl"><span>Original</span><span class="grade bad">grade 21.4</span></div>
+          <p>Context strip — an award&#x27;s size as a percentile of that agency&#x27;s awards over the trailing 12 months (shown only when the agency has ≥20 awards in the window), and the vendor&#x27;s share of the agency&#x27;s award dollars over the same window (exact published name; name variants are not merged here).</p>
+        </div>
+        <div class="block">
+          <div class="lbl"><span>Rewrite</span><span class="grade bad">grade 22.8</span></div>
+          <p>Context strip — an award&#x27;s size shown as a percentile of that agency&#x27;s awards over the past 12 months (only shown when the agency has 20 or more awards in that time), and the vendor&#x27;s share of the agency&#x27;s award dollars over the same period (using the exact published name; name variants are not merged here).</p>
+        </div>
+      </div>
+      <div class="metarow">
+        <span class="pill fail">fails nycsg7</span>
+        <span class="pill pass">entity check: pass</span>
+      </div>
+      
+      <div class="note">candidate still over target: grade 22.81 &gt; target 7.0</div>
+    </div>
+
+    <div class="card">
+      <div class="src">about.html &middot; Flag: Short ad window</div>
+      <div class="pair">
+        <div class="block">
+          <div class="lbl"><span>Original</span><span class="grade bad">grade 13.9</span></div>
+          <p>Short ad window — the days between a solicitation&#x27;s publication and its response deadline, flagged when it is 10 days or fewer and less than half the agency&#x27;s own median (median computed over that agency&#x27;s last 200 solicitations). Short windows favor incumbents who already knew the work was coming.</p>
+        </div>
+        <div class="block">
+          <div class="lbl"><span>Rewrite</span><span class="grade bad">grade 8.0</span></div>
+          <p>Short ad window — the time between when a solicitation is posted and when responses are due. It gets flagged when this window is 10 days or fewer and also less than half of the agency&#x27;s own median. The median is based on that agency&#x27;s last 200 solicitations. Short windows help incumbents who already knew the work was coming.</p>
+        </div>
+      </div>
+      <div class="metarow">
+        <span class="pill fail">fails nycsg7</span>
+        <span class="pill pass">entity check: pass</span>
+      </div>
+      
+      <div class="note">candidate still over target: grade 7.97 &gt; target 7.0</div>
+    </div>
+
+    <div class="card">
+      <div class="src">about.html &middot; Flag: Non-competitive method</div>
+      <div class="pair">
+        <div class="block">
+          <div class="lbl"><span>Original</span><span class="grade bad">grade 17.7</span></div>
+          <p>Non-competitive method — the notice&#x27;s own stated selection method is a negotiated acquisition, sole-source, emergency, or demonstration-project procurement. Sometimes justified; always worth knowing.</p>
+        </div>
+        <div class="block">
+          <div class="lbl"><span>Rewrite</span><span class="grade bad">grade 8.6</span></div>
+          <p>Non-competitive method — the notice says the buyer plans to skip open competition. This can happen with a negotiated deal, a sole-source award, an emergency purchase, or a demonstration project. Sometimes there is a good reason for it. Either way, it is worth knowing.</p>
+        </div>
+      </div>
+      <div class="metarow">
+        <span class="pill fail">fails nycsg7</span>
+        <span class="pill pass">entity check: pass</span>
+      </div>
+      
+      <div class="note">candidate still over target: grade 8.64 &gt; target 7.0</div>
+    </div>
+
+    <div class="card">
+      <div class="src">about.html &middot; Data quirk: data-entry errors</div>
+      <div class="pair">
+        <div class="block">
+          <div class="lbl"><span>Original</span><span class="grade bad">grade 11.4</span></div>
+          <p>A few contract amounts are data-entry errors — three rows claim $10 billion or more, topping out at $96 trillion (the largest verified real award is ≈$6.68B). Money filters and amount-sorted digests exclude amounts ≥ $10B rather than let one typo dominate every ranking.</p>
+        </div>
+        <div class="block">
+          <div class="lbl"><span>Rewrite</span><span class="grade good">grade 6.7</span></div>
+          <p>A few contract amounts are data-entry errors. Three rows list $10 billion or more, with the largest at $96 trillion. But the biggest real award we can verify is about $6.68B. To keep one typo from throwing off every ranking, money filters and amount-sorted lists leave out any amount that is $10B or higher.</p>
+        </div>
+      </div>
+      <div class="metarow">
+        <span class="pill pass">passes nycsg7</span>
+        <span class="pill pass">entity check: pass</span>
+      </div>
+      
+      <div class="note">grade 6.72 meets target 7.0; meaning check passed</div>
+    </div>
+
+    <div class="card">
+      <div class="src">about.html &middot; Data quirk: personnel rows</div>
+      <div class="pair">
+        <div class="block">
+          <div class="lbl"><span>Original</span><span class="grade bad">grade 11.2</span></div>
+          <p>87.5% of all rows are civil-service personnel changes, not civic notices. Every statistic on this site is computed within its own section — a &quot;global&quot; City Record number would really be a personnel-file number.</p>
+        </div>
+        <div class="block">
+          <div class="lbl"><span>Rewrite</span><span class="grade bad">grade 7.4</span></div>
+          <p>87.5% of all rows are civil-service staff changes, not public notices. Every statistic on this site is worked out within its own section. So a &quot;global&quot; City Record number would really just be a personnel-file number.</p>
+        </div>
+      </div>
+      <div class="metarow">
+        <span class="pill fail">fails nycsg7</span>
+        <span class="pill pass">entity check: pass</span>
+      </div>
+      
+      <div class="note">candidate still over target: grade 7.45 &gt; target 7.0</div>
+    </div>
+
+    <div class="card">
+      <div class="src">data.html &middot; Lede</div>
+      <div class="pair">
+        <div class="block">
+          <div class="lbl"><span>Original</span><span class="grade bad">grade 13.1</span></div>
+          <p>The City Record dataset, at a glance — live aggregates queried straight from NYC Open Data by your browser, nothing cached server-side. Numbers here follow the honesty rules: statistics stay within their section, apparent data-entry errors (amounts ≥ $10B) are excluded, and placeholder deadlines aren&#x27;t counted as real.</p>
+        </div>
+        <div class="block">
+          <div class="lbl"><span>Rewrite</span><span class="grade good">grade 4.1</span></div>
+          <p>The City Record dataset at a glance. Your browser pulls live totals right from NYC Open Data. Nothing is stored on our server. We follow honesty rules for these numbers. Stats stay in their own section. We leave out likely data-entry errors, such as amounts of $10B or more. We also do not count fake or placeholder deadlines as real.</p>
+        </div>
+      </div>
+      <div class="metarow">
+        <span class="pill pass">passes nycsg7</span>
+        <span class="pill pass">entity check: pass</span>
+      </div>
+      
+      <div class="note">grade 4.08 meets target 7.0; meaning check passed</div>
+    </div>
+
+    <div class="card">
+      <div class="src">data.html &middot; Top vendors note</div>
+      <div class="pair">
+        <div class="block">
+          <div class="lbl"><span>Original</span><span class="grade bad">grade 11.8</span></div>
+          <p>Vendor names aren&#x27;t canonicalized in the source — near-duplicate spellings appear as separate rows here.</p>
+        </div>
+        <div class="block">
+          <div class="lbl"><span>Rewrite</span><span class="grade good">grade 4.3</span></div>
+          <p>Vendor names aren&#x27;t cleaned up in the source. Because of this, spellings that are almost the same show up as separate rows here.</p>
+        </div>
+      </div>
+      <div class="metarow">
+        <span class="pill pass">passes nycsg7</span>
+        <span class="pill pass">entity check: pass</span>
+      </div>
+      
+      <div class="note">grade 4.29 meets target 7.0; meaning check passed</div>
+    </div>
+
+    <div class="card">
+      <div class="src">data.html &middot; Top agencies note</div>
+      <div class="pair">
+        <div class="block">
+          <div class="lbl"><span>Original</span><span class="grade bad">grade 10.7</span></div>
+          <p>&quot;Cleaned&quot; = amounts over $10B excluded as data-entry errors; see the underlying data.</p>
+        </div>
+        <div class="block">
+          <div class="lbl"><span>Rewrite</span><span class="grade bad">grade 8.4</span></div>
+          <p>&quot;Cleaned&quot; means amounts over $10B were left out as data-entry errors; see the underlying data.</p>
+        </div>
+      </div>
+      <div class="metarow">
+        <span class="pill fail">fails nycsg7</span>
+        <span class="pill pass">entity check: pass</span>
+      </div>
+      
+      <div class="note">candidate still over target: grade 8.35 &gt; target 7.0</div>
+    </div>
+<div class="foot">
+  <b>Rewrites shown here are LLM suggestions, not accepted edits.</b> Each one was re-measured
+  with the same Flesch-Kincaid formula used for gating, and checked for meaning preservation
+  (numbers, URLs, and proper nouns present in the original must also appear in the candidate) &mdash;
+  but that check is a heuristic, not a semantic-equivalence proof. A human should read every
+  rewrite before it ships. None of the text on this page has been applied to crol-list; it is a
+  demonstration of the <code>--suggest</code> mode's output, run live against crol-list's real
+  published prose. See the <a href="https://github.com/jimdc/readable-or-else#the-rewrite-mode---suggest" target="_blank" rel="noopener">rewrite mode's documented guarantees and limits</a>.
+</div>
+</div>
+</body>
+</html>
