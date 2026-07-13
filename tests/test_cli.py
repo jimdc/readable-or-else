@@ -6,6 +6,19 @@ import tempfile
 import unittest
 
 from readable_or_else.cli import main
+from tests.fakes import FakeLLMClient
+
+HARD_SENTENCE = (
+    "Notwithstanding the aforementioned regulatory considerations, applicants "
+    "must remit $500 to the Department of Buildings via https://example.gov/pay "
+    "in order to obtain provisional authorization from the New York City Council."
+)
+
+GOOD_REWRITE = (
+    "You must pay $500 to the Department of Buildings. Pay at "
+    "https://example.gov/pay. This gets you provisional approval from the "
+    "New York City Council."
+)
 
 
 class TestCliCheck(unittest.TestCase):
@@ -133,6 +146,73 @@ class TestCliBaseline(unittest.TestCase):
                     ["check", src, "--preset", "nycsg7", "--mode", "ratchet", "--baseline", baseline_path]
                 )
             self.assertEqual(code, 0)
+
+
+class TestCliFix(unittest.TestCase):
+    def _write(self, tmp, name, content):
+        path = os.path.join(tmp, name)
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+        return path
+
+    def test_fix_applies_accepted_rewrite_and_writes_the_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, "hard.html", f"<p>{HARD_SENTENCE}</p>")
+            client = FakeLLMClient(lambda system, user: GOOD_REWRITE)
+
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = main(["fix", path, "--preset", "nycsg7"], llm_client=client)
+
+            self.assertEqual(code, 0)
+            with open(path, encoding="utf-8") as f:
+                written = f.read()
+            self.assertIn(GOOD_REWRITE, written)
+            self.assertNotIn(HARD_SENTENCE, written)
+            self.assertIn("yes", out.getvalue())
+
+    def test_fix_leaves_file_untouched_on_denial_and_exits_nonzero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, "hard.html", f"<p>{HARD_SENTENCE}</p>")
+            original = open(path, encoding="utf-8").read()
+            client = FakeLLMClient(lambda system, user: HARD_SENTENCE)  # never improves
+
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = main(["fix", path, "--preset", "nycsg7", "--max-retries", "0"], llm_client=client)
+
+            self.assertEqual(code, 1)
+            with open(path, encoding="utf-8") as f:
+                self.assertEqual(f.read(), original)
+            self.assertIn("grade_target", out.getvalue())
+
+    def test_fix_json_format(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, "hard.html", f"<p>{HARD_SENTENCE}</p>")
+            client = FakeLLMClient(lambda system, user: GOOD_REWRITE)
+
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out):
+                code = main(["fix", path, "--preset", "nycsg7", "--format", "json"], llm_client=client)
+
+            self.assertEqual(code, 0)
+            payload = json.loads(out.getvalue())
+            self.assertTrue(payload[0]["changed"])
+            self.assertTrue(payload[0]["passages"][0]["applied"])
+
+    def test_fix_on_passing_file_makes_no_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, "easy.html", "<p>The cat sat. It was happy.</p>")
+            original = open(path, encoding="utf-8").read()
+            client = FakeLLMClient(lambda system, user: "should never be called")
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                code = main(["fix", path, "--preset", "nycsg7"], llm_client=client)
+
+            self.assertEqual(code, 0)
+            with open(path, encoding="utf-8") as f:
+                self.assertEqual(f.read(), original)
+            self.assertEqual(len(client.calls), 0)
 
 
 if __name__ == "__main__":

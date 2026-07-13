@@ -15,10 +15,21 @@ instead?* `--suggest` calls a configurable LLM to draft a plain-language
 rewrite, re-measures it with the same formula used for gating, and only
 surfaces it if the rewrite actually hits the target grade and preserves the
 original's numbers, links, and named entities. It never edits your files —
-suggestions are always a human-reviewed proposal, never an auto-apply.
+suggestions are always a human-reviewed proposal.
 
 **Why the name:** the gate fails your build... or else the rewrite mode
 tells you exactly what to say instead.
+
+**The harder problem isn't passing the gate once — it's staying passed as
+the text keeps changing.** A page that reads at grade 7 today drifts the
+moment someone edits a paragraph, adds a section, or pastes in new copy from
+a different author. Re-running a rewrite tool by hand after every edit
+doesn't scale, which is exactly the problem eslint --fix and prettier --write
+solved for code style: don't just report the failure, fix it, automatically,
+every time, and let a human review the diff instead of authoring it from
+scratch. `fix` is that convention applied to accessibility: it rewrites each
+failing passage, runs the candidate through a documented set of denial rules,
+and applies only the candidates that pass — see "Fix mode" below.
 
 ## Why grade 7
 
@@ -157,9 +168,10 @@ component; it shouldn't assume one vendor.
    surfaced: numbers, URLs, and multi-word capitalized phrases (a proxy for
    named entities) present in the original must also appear in the
    candidate, or the rewrite is rejected.
-3. A rewrite is **never auto-applied.** It's emitted as a suggestion —
-   PR-comment-ready markdown, or folded into `--format json`/`gh-annotations`
-   output — for a human to read and accept or discard.
+3. `--suggest` itself **never writes to your files.** It's emitted as a
+   suggestion — PR-comment-ready markdown, or folded into `--format
+   json`/`gh-annotations` output — for a human to read and accept or discard.
+   (`fix`, below, is the separate, opt-in mode that does apply candidates.)
 4. **English only in v1.**
 
 **What it does not guarantee** (read before trusting it):
@@ -172,6 +184,113 @@ component; it shouldn't assume one vendor.
   gating itself (`check` without `--suggest`) is pure arithmetic and free.
 - `--extract dom-rendered` (SPA-rendered content) is not implemented in v1 —
   see Limits.
+
+## Fix mode (`fix`): auto-apply, gated by denial rules
+
+```bash
+export READABLE_OR_ELSE_LLM_BASE="https://api.openai.com/v1"
+export READABLE_OR_ELSE_LLM_KEY="sk-..."
+export READABLE_OR_ELSE_LLM_MODEL="gpt-4o-mini"
+
+readable-or-else fix about.html data.html --preset nycsg7
+```
+
+For each file, `fix` finds every *leaf text element* (a `<p>`, `<li>`,
+heading, table cell, etc. whose entire content is text — no nested tags)
+that measures over the preset's target grade, asks the configured LLM for a
+rewrite, runs the candidate through the denial rules below, and — only if it
+clears all of them — replaces that element's text content in place. Exit
+code is `1` if any passage was left over-target (denied, or structurally
+ineligible), `0` otherwise, mirroring `check`'s gate semantics so `fix` slots
+into the same CI step.
+
+**Why this is opt-in, not the default:** a denial rule you haven't yet
+watched fire on your own prose is a rule you're trusting blind. `check`
+(gate the build) and `--suggest` (propose a rewrite for a human to read)
+stay the default path; `fix` is for consumers who've already seen `--suggest`
+output on their content and are comfortable letting the same checks decide
+automatically. New consumers should see suggestions before trusting the
+denial rules with their prose.
+
+### The denial rules
+
+A candidate is applied only if it clears every rule below, checked in this
+order — the first one it fails is the one reported:
+
+| Rule | What it checks | Why |
+|---|---|---|
+| `grade_target` | Candidate is re-measured; must be at or under the preset's `max_grade`. | The whole point — a rewrite that doesn't actually simplify the text isn't a fix. |
+| `meaning_preserved` | Numbers, URLs, and multi-word capitalized phrases (a proxy for named entities) present in the original must still appear in the candidate. | Catches a rewrite that quietly drops a fee amount, a deadline, or an agency name while "simplifying." |
+| `length_ratio` | Candidate length must stay within a configurable ratio of the original's (`--min-length-ratio`/`--max-length-ratio`, default 0.4x-2.5x). | Catches drastic truncation ("Yes.") or padding that technically passes the grade check but isn't a faithful rewrite. |
+| `markup_integrity` | Candidate must not contain a raw `<` or `>`. | An LLM hallucinating HTML into its output would otherwise get spliced into a text node verbatim. |
+| *(extra, configurable)* | Any caller-supplied `DenialConfig(extra_denials=[...])` callables — house style rules, banned phrases, whatever your content needs. | v1 exposes this at the library level only; the CLI doesn't yet load custom rules from a config file. |
+
+**Link anchors are preserved structurally, not by a text check.** A leaf
+element that contains any nested tag at all — most commonly a `<a>` — is
+never a rewrite candidate in the first place, so an anchor's visible link
+text is never at risk. This also means `fix` never attempts to rewrite a
+paragraph that contains an inline link, a `<strong>`, or any other inline
+markup — v1 has no safe way to re-splice a partial rewrite around inline
+tags without risking the "never break markup" guarantee, so those passages
+are left untouched (reported as skipped) rather than guessed at.
+
+**Retry-with-feedback.** A denial names a specific rule and reason — exactly
+what a second LLM attempt needs. On denial, `fix` makes one bounded retry
+(`--max-retries`, default `1`) that folds the failed rule and reason into the
+prompt, then stops. This is cost-conscious by design: at most one extra LLM
+call per failing passage, not a loop until something sticks.
+
+**A denied candidate degrades to exactly the `--suggest` outcome** — nothing
+is lost. The file keeps failing `check` as it did before, and the report
+names which rule denied it, so a human reviewing the PR sees the same
+information `--suggest` would have shown.
+
+### The maintenance loop in CI
+
+The intended shape: `fix` runs first and commits its accepted rewrites to
+the PR branch (or opens a small auto-fix PR of its own), then `check` gates
+whatever is left — same two-step split as `eslint --fix && eslint`.
+
+```yaml
+name: readable-or-else
+on: pull_request
+jobs:
+  reading-level:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install readable-or-else
+      - name: Auto-fix over-target passages
+        env:
+          READABLE_OR_ELSE_LLM_BASE: ${{ secrets.LLM_BASE }}
+          READABLE_OR_ELSE_LLM_KEY: ${{ secrets.LLM_KEY }}
+          READABLE_OR_ELSE_LLM_MODEL: gpt-4o-mini
+        run: |
+          readable-or-else fix about.html data.html changelog.html --preset nycsg7 || true
+      - name: Commit any applied rewrites back to the PR branch
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "readable-or-else: auto-apply accessibility rewrites"
+      - name: Gate whatever is still over target
+        run: |
+          readable-or-else check about.html data.html changelog.html \
+            --preset nycsg7 --mode ratchet \
+            --baseline reading-level-baseline.json \
+            --format gh-annotations
+```
+
+`fix`'s own exit code is deliberately ignored (`|| true`) in this recipe —
+its job is to apply what it safely can, not to gate; `check` afterward is
+still the gate. Swap the commit-back step for
+`peter-evans/create-pull-request` if you'd rather land auto-fixes as their
+own reviewable PR instead of amending the triggering one.
 
 ## Limits (v1)
 
@@ -188,6 +307,13 @@ component; it shouldn't assume one vendor.
   page today.
 - **Rewrite suggestions are heuristically checked, not semantically
   verified.** See above.
+- **`fix` only touches leaf text elements with no nested markup.** A
+  paragraph containing a link, a `<strong>`, or any other inline tag is
+  skipped rather than partially rewritten — see "Fix mode" above for why.
+  A whole-file `.txt` input is treated as a single passage, same as `check`.
+- **`fix`'s extra denial rules are library-only in v1.** `DenialConfig(extra_denials=[...])`
+  works when calling `readable_or_else` as a library; the CLI doesn't yet
+  load custom denial callables from a config file.
 
 ## Development
 

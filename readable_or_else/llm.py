@@ -1,11 +1,15 @@
-"""LLM-backed rewrite mode — the product.
+"""LLM-backed rewrite: the shared primitive behind both `--suggest` and `fix`.
 
 Calls a configurable OpenAI-compatible chat-completions endpoint to produce a
 candidate rewrite of a failing passage at the target grade, re-measures the
 candidate with the same wrapped textstat formulas used for gating, and rejects
 it if it is still over target or fails a meaning-preservation heuristic check.
-A rewrite is NEVER auto-applied — it is only ever emitted as a suggestion for
-a human to accept.
+
+`rewrite_passage` below (the `--suggest` path) never writes anywhere — its
+candidate is only ever emitted as a suggestion for a human to accept. Applying
+a rewrite in place is a separate, opt-in mode: see fix.py and apply.py, which
+build on `check_meaning_preserved` here as one of several denial rules
+(denial_rules.py) that gate whether a candidate may be auto-applied.
 
 Provider-agnostic by design (env-configured base URL/key/model) so this works
 against OpenAI itself, Anthropic-via-OpenAI-compat shims, or a local proxy —
@@ -58,7 +62,7 @@ class LLMConfig:
         if not base_url or not model:
             raise RewriteUnavailable(
                 "READABLE_OR_ELSE_LLM_BASE and READABLE_OR_ELSE_LLM_MODEL must be set in the "
-                "environment to use --suggest/--rewrite (READABLE_OR_ELSE_LLM_KEY is optional, "
+                "environment to use --suggest or fix (READABLE_OR_ELSE_LLM_KEY is optional, "
                 "for endpoints that don't require auth)."
             )
         return cls(base_url=base_url.rstrip("/"), model=model, api_key=api_key)

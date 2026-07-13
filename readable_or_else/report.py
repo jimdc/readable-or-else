@@ -2,6 +2,7 @@
 
 import json
 
+from .fix import FileFixReport
 from .gate import FileResult
 from .llm import RewriteResult
 
@@ -93,3 +94,54 @@ def format_results(
     if fmt == "gh-annotations":
         return to_gh_annotations(results)
     raise ValueError(f"unknown format {fmt!r}; expected json, table, or gh-annotations")
+
+
+def fix_reports_to_json(reports: list[FileFixReport]) -> str:
+    payload = []
+    for r in reports:
+        payload.append({
+            "path": r.path,
+            "changed": r.changed,
+            "skipped_nested_markup": r.skipped_nested_markup,
+            "passages": [
+                {
+                    "tag": p.tag,
+                    "applied": p.applied,
+                    "rule": p.rule,
+                    "reason": p.reason,
+                    "attempts": p.attempts,
+                    "before_grade": p.before_grade,
+                    "after_grade": p.after_grade,
+                    "original_text": p.original_text,
+                    "candidate_text": p.candidate_text,
+                }
+                for p in r.results
+            ],
+        })
+    return json.dumps(payload, indent=2)
+
+
+def fix_reports_to_table(reports: list[FileFixReport]) -> str:
+    header = f"{'APPLIED':<10}{'TAG':<14}{'PATH':<30}{'RULE':<20}  REASON"
+    lines = [header, "-" * len(header)]
+    for r in reports:
+        if not r.results:
+            lines.append(f"{'-':<10}{'-':<14}{r.path:<30}{'-':<20}  no over-target passages")
+        for p in r.results:
+            applied = "yes" if p.applied else "no"
+            lines.append(f"{applied:<10}{p.tag or '-':<14}{r.path:<30}{p.rule or '-':<20}  {p.reason}")
+        if r.skipped_nested_markup:
+            lines.append(
+                f"{'skip':<10}{'-':<14}{r.path:<30}{'nested_markup':<20}  "
+                f"{r.skipped_nested_markup} over-target passage(s) contain nested markup "
+                "(links/inline formatting) — not eligible for fix in v1"
+            )
+    return "\n".join(lines)
+
+
+def format_fix_report(reports: list[FileFixReport], fmt: str) -> str:
+    if fmt == "json":
+        return fix_reports_to_json(reports)
+    if fmt == "table":
+        return fix_reports_to_table(reports)
+    raise ValueError(f"unknown format {fmt!r}; expected json or table")
