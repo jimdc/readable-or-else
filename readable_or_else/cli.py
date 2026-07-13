@@ -5,7 +5,12 @@ import sys
 
 from .apply import fix_html
 from .baseline import load_baseline, new_baseline, save_baseline, tighten_entry
-from .denial_rules import DenialConfig, DEFAULT_MAX_LENGTH_RATIO, DEFAULT_MIN_LENGTH_RATIO
+from .denial_rules import (
+    DenialConfig,
+    DEFAULT_INLINE_DOMINANT_RATIO,
+    DEFAULT_MAX_LENGTH_RATIO,
+    DEFAULT_MIN_LENGTH_RATIO,
+)
 from .extract import extract_visible_text, DomRenderedNotImplemented, extract_dom_rendered
 from .fix import FileFixReport, fix_text
 from .gate import evaluate_file, overall_passed
@@ -71,6 +76,11 @@ def build_parser() -> argparse.ArgumentParser:
     fix.add_argument("--max-retries", type=int, default=1, help="bounded retry-with-feedback attempts after a denial")
     fix.add_argument("--min-length-ratio", type=float, default=DEFAULT_MIN_LENGTH_RATIO)
     fix.add_argument("--max-length-ratio", type=float, default=DEFAULT_MAX_LENGTH_RATIO)
+    fix.add_argument(
+        "--inline-dominant-ratio", type=float, default=DEFAULT_INLINE_DOMINANT_RATIO,
+        help="deny a mixed-content passage without calling the LLM when inline elements "
+             "(links, bold, etc.) make up at least this fraction of its text",
+    )
     fix.add_argument("--format", default="table", choices=["json", "table"])
 
     return parser
@@ -157,7 +167,9 @@ def run_fix(args, llm_client=None) -> int:
             raise SystemExit(f"fix mode requires a configured LLM: {exc}") from exc
 
     denial_config = DenialConfig(
-        min_length_ratio=args.min_length_ratio, max_length_ratio=args.max_length_ratio
+        min_length_ratio=args.min_length_ratio,
+        max_length_ratio=args.max_length_ratio,
+        inline_dominant_ratio=args.inline_dominant_ratio,
     )
 
     reports = []

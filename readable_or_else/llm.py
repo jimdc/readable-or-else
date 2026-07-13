@@ -43,6 +43,23 @@ DEFAULT_SYSTEM_PROMPT = (
     "reply with only the rewritten passage."
 )
 
+# Used by fix.py's attempt_fix_mixed (mixed_content.py) for passages that
+# contain inline markup (links, bold, etc.) serialized as placeholder tokens.
+MIXED_CONTENT_SYSTEM_PROMPT = (
+    "You are a plain-language editor. Rewrite the given passage so it reads at "
+    "or below U.S. grade {target_grade} on the Flesch-Kincaid scale, in {language}. "
+    "The passage contains placeholder tokens shaped like [LINK1:some text] standing "
+    "in for links or inline formatting (bold, emphasis, etc.) — treat each whole "
+    "token, brackets included, as one opaque word. Rules for tokens: every token in "
+    "the input must appear in your output exactly once, byte-for-byte identical "
+    "including its brackets and inner text; you may move a token to a different "
+    "place in the sentence, but you may never edit, translate, shorten, or drop "
+    "what is inside its brackets, and never invent a new token. Preserve every "
+    "number, proper noun, and URL that appears outside a token, exactly. Keep the "
+    "same factual content and intent. Do not add commentary, headings, or "
+    "quotation marks — reply with only the rewritten passage, tokens included."
+)
+
 
 class RewriteUnavailable(RuntimeError):
     """Raised when the LLM endpoint isn't configured or the call fails."""

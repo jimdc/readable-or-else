@@ -133,8 +133,9 @@ def fix_reports_to_table(reports: list[FileFixReport]) -> str:
         if r.skipped_nested_markup:
             lines.append(
                 f"{'skip':<10}{'-':<14}{r.path:<30}{'nested_markup':<20}  "
-                f"{r.skipped_nested_markup} over-target passage(s) contain nested markup "
-                "(links/inline formatting) — not eligible for fix in v1"
+                f"{r.skipped_nested_markup} over-target passage(s) contain markup outside "
+                "mixed-content rewriting's supported shape (nested inline-in-inline, "
+                "<code>, or other unsupported tags) — not eligible for fix"
             )
     return "\n".join(lines)
 

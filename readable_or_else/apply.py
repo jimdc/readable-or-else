@@ -1,27 +1,31 @@
 """HTML-aware apply-in-place: fix mode's markup layer.
 
-Walks the parsed document and considers each *leaf text element* — a tag
-whose entire content is text, with no nested tags at all (a plain `<p>`, a
-plain `<li>`, a heading, and so on) — as one rewrite passage. An element that
-contains any nested tag (a `<a>`, `<span>`, `<strong>`, an inline image,
-anything) is never considered: v1 has no safe way to re-splice a partial
-rewrite around inline markup without risking exactly the "never break
-markup" guarantee this module exists to provide, so those passages are left
-untouched and counted as skipped rather than guessed at. This is also how
-link-anchor text ends up preserved: a paragraph containing a link is never a
-rewrite candidate in the first place, so the anchor is never at risk.
+Walks the parsed document and considers each *leaf block element* — a tag
+whose direct children are text and, at most, a bounded set of inline tags
+(a plain `<p>`, a plain `<li>`, a heading, and so on) — as one rewrite
+passage. Two shapes are handled:
 
-Accepted candidates are spliced in by replacing the leaf element's contents
-with a single new text node — the element's tag, attributes, and position in
-the tree are never touched, so everything outside the rewritten text is
-byte-identical before and after.
+  - A pure leaf (no nested tags at all): the whole element's text is one
+    passage, rewritten and spliced back as a single new text node — the
+    element's tag, attributes, and position in the tree are never touched.
+  - A *mixed-content* leaf (text plus supported inline tags like `<a>`,
+    `<b>`, `<em>` — see mixed_content.py's INLINE_TAGS): the passage is
+    serialized to placeholder-bearing text, rewritten, and reassembled by
+    re-using the original inline Tag objects at their new positions, so
+    their attributes (an `<a href>`, in particular) are untouched too.
+
+An element outside both shapes — nested inline-in-inline, a `<code>` span,
+or anything else mixed_content.py's `serialize_mixed_content` declines — is
+left untouched and counted as skipped rather than guessed at. See
+mixed_content.py's module docstring for the exact list of honest limits.
 """
 
 from bs4 import BeautifulSoup, NavigableString
 
 from .denial_rules import DenialConfig
-from .fix import PassageFixResult, attempt_fix
+from .fix import PassageFixResult, attempt_fix, attempt_fix_mixed
 from .measure import measure
+from .mixed_content import reassemble, serialize_mixed_content
 
 LEAF_TAGS = (
     "p", "li", "td", "th", "h1", "h2", "h3", "h4", "h5", "h6",
@@ -59,26 +63,43 @@ def fix_html(
     for el in soup.find_all(True):
         if el.name in SKIP_TAGS:
             continue
-
-        if el.name in LEAF_TAGS and el.find_all(True) and el.get_text().strip():
-            m = measure(el.get_text(), language=language)
-            if m.grade is not None and m.grade > target_grade:
-                skipped += 1
+        if el.name not in LEAF_TAGS:
             continue
 
-        if not _is_leaf_text_element(el):
+        has_nested = bool(el.find_all(True))
+
+        if not has_nested:
+            if not _is_leaf_text_element(el):
+                continue
+            original_text = el.get_text()
+            m = measure(original_text, language=language)
+            if m.grade is None or m.grade <= target_grade:
+                continue
+
+            result = attempt_fix(
+                original_text, target_grade, language, client, denial_config, max_retries, tag=el.name
+            )
+            if result.applied:
+                _replace_text_content(el, result.candidate_text)
+            results.append(result)
             continue
 
-        original_text = el.get_text()
-        m = measure(original_text, language=language)
+        if not el.get_text().strip():
+            continue
+        m = measure(el.get_text(), language=language)
         if m.grade is None or m.grade <= target_grade:
             continue
 
-        result = attempt_fix(
-            original_text, target_grade, language, client, denial_config, max_retries, tag=el.name
+        passage = serialize_mixed_content(el)
+        if passage is None:
+            skipped += 1
+            continue
+
+        result, raw_candidate = attempt_fix_mixed(
+            passage, target_grade, language, client, denial_config, max_retries, tag=el.name
         )
-        if result.applied:
-            _replace_text_content(el, result.candidate_text)
+        if result.applied and raw_candidate is not None:
+            reassemble(el, raw_candidate, passage.nodes)
         results.append(result)
 
     return str(soup), results, skipped

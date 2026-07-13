@@ -25,11 +25,23 @@ Rules (in evaluation order):
   5. extra (configurable) — caller-supplied callables for house-specific
                            denials (banned phrases, tone rules, etc).
 
-A sixth concern from the design brief, "link anchors preserved," is enforced
-structurally rather than as a post-rewrite text check: apply.py never
-considers a text node for rewrite if it sits inside (or wraps) a nested
-inline tag such as `<a>`, so anchor text is never a rewrite candidate in the
-first place — see apply.py's leaf-element scope note.
+These five run on plain prose (a leaf element's text, or a mixed-content
+passage's *dehydrated* text — placeholders replaced by their inner text, so
+grade/meaning/length are measured on what a reader actually sees, not on
+bracket syntax). A leaf element with no nested inline tags stays fully
+covered by "link anchors preserved" as before: it is never a rewrite
+candidate in the first place if it sits inside (or wraps) a nested inline
+tag — see apply.py's leaf-element scope note.
+
+`rule_placeholder_preserved` below is the sixth rule, specific to the
+mixed-content path (see mixed_content.py): it runs separately, BEFORE the
+five above and on the *raw* placeholder-bearing text (not dehydrated prose),
+since dehydration itself depends on every placeholder resolving correctly.
+It subsumes "link anchors preserved" for that path — a candidate that drops,
+duplicates, or edits a placeholder token is denied before its prose is
+measured at all. fix.py's `attempt_fix_mixed` is the caller; it is not part
+of `DEFAULT_RULES` because it operates on a different text pair than the
+other five.
 """
 
 from dataclasses import dataclass, field
@@ -37,9 +49,11 @@ from typing import Callable
 
 from .llm import check_meaning_preserved
 from .measure import measure
+from .mixed_content import PLACEHOLDER_TOKEN_RE
 
 DEFAULT_MIN_LENGTH_RATIO = 0.4
 DEFAULT_MAX_LENGTH_RATIO = 2.5
+DEFAULT_INLINE_DOMINANT_RATIO = 0.5
 
 
 @dataclass
@@ -61,6 +75,7 @@ class DenialOutcome:
 class DenialConfig:
     min_length_ratio: float = DEFAULT_MIN_LENGTH_RATIO
     max_length_ratio: float = DEFAULT_MAX_LENGTH_RATIO
+    inline_dominant_ratio: float = DEFAULT_INLINE_DOMINANT_RATIO
     extra_denials: list[Callable[[str, str], DenialOutcome]] = field(default_factory=list)
 
 
@@ -108,6 +123,34 @@ def rule_markup_integrity(original: str, candidate: str, **_) -> DenialOutcome:
             "candidate contains a raw '<' or '>' — would corrupt markup if spliced into a text node",
         )
     return DenialOutcome.ok()
+
+
+def rule_placeholder_preserved(original: str, candidate: str, **_) -> DenialOutcome:
+    """Mixed-content-only rule: `original`/`candidate` are placeholder-bearing
+    text (see mixed_content.py), not prose. Every placeholder token in
+    `original` must appear in `candidate` exactly once, byte-for-byte
+    identical brackets and all; nothing may be added. Order may change — the
+    rewrite is free to move a token to a different place in the sentence.
+
+    Not part of DEFAULT_RULES: it is invoked explicitly by fix.py's
+    `attempt_fix_mixed`, before the five prose-level rules above run on the
+    dehydrated text this rule's pass makes possible.
+    """
+    original_tokens = PLACEHOLDER_TOKEN_RE.findall(original)
+    candidate_tokens = PLACEHOLDER_TOKEN_RE.findall(candidate)
+    if sorted(original_tokens) == sorted(candidate_tokens):
+        return DenialOutcome.ok()
+
+    missing = sorted(set(original_tokens) - set(candidate_tokens))
+    extra = sorted(set(candidate_tokens) - set(original_tokens))
+    detail_parts = []
+    if missing:
+        detail_parts.append(f"missing: {missing}")
+    if extra:
+        detail_parts.append(f"altered or extra: {extra}")
+    return DenialOutcome.deny(
+        "placeholder_preserved", "; ".join(detail_parts) or "placeholder token count mismatch"
+    )
 
 
 DEFAULT_RULES: list[Callable[..., DenialOutcome]] = [
