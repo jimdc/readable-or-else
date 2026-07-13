@@ -21,7 +21,7 @@ cost-conscious by design, not a loop until something sticks.
 from dataclasses import dataclass
 
 from .denial_rules import DenialConfig, rule_placeholder_preserved, run_denial_rules
-from .llm import DEFAULT_SYSTEM_PROMPT, MIXED_CONTENT_SYSTEM_PROMPT, LLMClient, RewriteUnavailable
+from .llm import DEFAULT_SYSTEM_PROMPT, MIXED_CONTENT_SYSTEM_PROMPT, CallBudgetExceeded, RewriteClient, RewriteUnavailable
 from .measure import measure
 from .mixed_content import MixedContentPassage, dehydrate
 
@@ -49,7 +49,7 @@ def attempt_fix(
     text: str,
     target_grade: float,
     language: str,
-    client: LLMClient,
+    client: RewriteClient,
     denial_config: DenialConfig | None = None,
     max_retries: int = 1,
     tag: str | None = None,
@@ -68,6 +68,17 @@ def attempt_fix(
         attempts = attempt_num + 1
         try:
             candidate = client.complete(system, text)
+        except CallBudgetExceeded as exc:
+            return PassageFixResult(
+                tag=tag,
+                original_text=text,
+                candidate_text=None,
+                applied=False,
+                rule="budget_exceeded",
+                reason=str(exc),
+                attempts=attempts,
+                before_grade=before.grade,
+            )
         except RewriteUnavailable as exc:
             return PassageFixResult(
                 tag=tag,
@@ -121,7 +132,7 @@ def attempt_fix_mixed(
     passage: MixedContentPassage,
     target_grade: float,
     language: str,
-    client: LLMClient,
+    client: RewriteClient,
     denial_config: DenialConfig | None = None,
     max_retries: int = 1,
     tag: str | None = None,
@@ -173,6 +184,17 @@ def attempt_fix_mixed(
         attempts = attempt_num + 1
         try:
             raw_candidate = client.complete(system, passage.placeholder_text)
+        except CallBudgetExceeded as exc:
+            return PassageFixResult(
+                tag=tag,
+                original_text=passage.dehydrated_text,
+                candidate_text=None,
+                applied=False,
+                rule="budget_exceeded",
+                reason=str(exc),
+                attempts=attempts,
+                before_grade=before.grade,
+            ), None
         except RewriteUnavailable as exc:
             return PassageFixResult(
                 tag=tag,
@@ -240,7 +262,7 @@ def fix_text(
     text: str,
     target_grade: float,
     language: str,
-    client: LLMClient,
+    client: RewriteClient,
     denial_config: DenialConfig | None = None,
     max_retries: int = 1,
 ) -> tuple[str, list[PassageFixResult]]:

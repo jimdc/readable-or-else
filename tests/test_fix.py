@@ -3,7 +3,7 @@ import unittest
 from readable_or_else.denial_rules import DenialConfig
 from readable_or_else.fix import attempt_fix, fix_text
 from tests.fakes import ErroringLLMClient, FakeLLMClient
-from readable_or_else.llm import RewriteUnavailable
+from readable_or_else.llm import CallBudgetExceeded, RewriteUnavailable
 
 COMPLEX_PASSAGE = (
     "Notwithstanding the aforementioned regulatory considerations, applicants "
@@ -65,6 +65,13 @@ class TestAttemptFix(unittest.TestCase):
         self.assertFalse(result.applied)
         self.assertEqual(result.rule, "llm_unavailable")
         self.assertIn("endpoint down", result.reason)
+
+    def test_call_budget_exceeded_reports_its_own_rule(self):
+        client = ErroringLLMClient(CallBudgetExceeded("call budget exceeded: reached"))
+        result = attempt_fix(COMPLEX_PASSAGE, target_grade=7, language="en", client=client)
+        self.assertFalse(result.applied)
+        self.assertEqual(result.rule, "budget_exceeded")
+        self.assertIn("call budget exceeded", result.reason)
 
     def test_configured_denial_config_threads_through(self):
         # Force a length-ratio denial via a tight custom config, on an otherwise-good rewrite.
