@@ -174,6 +174,9 @@ component; it shouldn't assume one vendor.
    (`fix`, below, is the separate, opt-in mode that does apply candidates.)
 4. **English only in v1.**
 
+See it run for real, not mocked: [`examples/crol-list-rewrites.html`](examples/crol-list-rewrites.html)
+is a live before/after showcase against crol-list's own hardest prose.
+
 **What it does not guarantee** (read before trusting it):
 
 - Meaning preservation is a heuristic, not a semantic-equivalence proof. It

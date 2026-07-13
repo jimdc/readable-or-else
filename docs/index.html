@@ -1,0 +1,247 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>readable-or-else &mdash; a readability CI gate + LLM plain-language rewrite mode</title>
+<meta name="description" content="readable-or-else is a Flesch-Kincaid readability CI gate with an LLM-backed rewrite mode. Live examples against the UDHR, the U.S. tax code, and the 14th Amendment, measured against the NYC, GOV.UK, and WCAG reading-level standards.">
+<style>
+:root{
+  --paper:#f7f4ec; --ink:#20201c; --ink-soft:#4a463d; --muted:#6b6558;
+  --rule:#ddd4c0; --card:#fffdf7; --accent:#1f4d3a; --accent-2:#8a3324;
+  --red:#a3311f; --red-bg:#fbeae6; --green:#1f6b45; --green-bg:#e9f4ec;
+  --amber:#8a5a10; --amber-bg:#fbf1de;
+  --font-serif:Georgia,'Iowan Old Style','Palatino Linotype',serif;
+  --font-sans:-apple-system,BlinkMacSystemFont,'Segoe UI',ui-sans-serif,system-ui,sans-serif;
+  --font-mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--paper);color:var(--ink);font:17px/1.6 var(--font-serif);-webkit-font-smoothing:antialiased}
+.wrap{max-width:840px;margin:0 auto;padding:0 24px 96px}
+a{color:var(--accent-2)}
+a:hover{text-decoration:underline}
+header{padding-top:40px}
+.kicker{font:700 12px/1 var(--font-sans);letter-spacing:.16em;text-transform:uppercase;color:var(--accent);margin-bottom:10px}
+h1{font-family:var(--font-serif);font-weight:700;font-size:clamp(1.8rem,5vw,2.6rem);line-height:1.08;margin:0 0 14px}
+.dek{font-size:1.05rem;color:var(--ink-soft);margin:0 0 6px;max-width:66ch}
+.nav{margin:18px 0 8px;font:600 13px/1 var(--font-sans)}
+.nav a{text-decoration:none}
+.rule{border:0;border-top:2px solid var(--ink);margin:22px 0}
+.rule--light{border-top:1px solid var(--rule)}
+h2{font:700 1.15rem/1.3 var(--font-serif);color:var(--accent);margin:40px 0 6px;padding-top:20px;border-top:1px solid var(--rule)}
+h2 .n{color:var(--muted);font-weight:400;font-size:.85em}
+.lede-box{background:var(--card);border:1px solid var(--rule);border-radius:10px;padding:18px 20px;margin:18px 0;font:15px/1.65 var(--font-sans);color:var(--ink-soft)}
+.lede-box b{color:var(--ink)}
+blockquote.std{margin:14px 0;padding:12px 16px;border-left:3px solid var(--accent);background:var(--card);font:15px/1.6 var(--font-sans);color:var(--ink-soft)}
+blockquote.std cite{display:block;margin-top:6px;font-size:12.5px;color:var(--muted);font-style:normal}
+.presetgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:12px;margin:18px 0}
+.presetcard{background:var(--card);border:1px solid var(--rule);border-radius:10px;padding:14px 16px;font:13.5px/1.55 var(--font-sans)}
+.presetcard .pname{font:700 13px/1 var(--font-sans);color:var(--accent);text-transform:none;margin-bottom:6px}
+.presetcard .ptarget{color:var(--muted)}
+.card{background:var(--card);border:1px solid var(--rule);border-radius:12px;padding:20px 22px;margin:18px 0}
+.card .src{font:600 12px/1 var(--font-sans);letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin-bottom:12px}
+.pair{display:grid;grid-template-columns:1fr;gap:14px;margin-top:10px}
+@media(min-width:640px){.pair{grid-template-columns:1fr 1fr}}
+.block{border:1px solid var(--rule);border-radius:8px;padding:14px 16px;background:#fff}
+.block .lbl{display:flex;justify-content:space-between;align-items:center;font:700 11px/1 var(--font-sans);letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:10px}
+.block p{margin:0;font-size:16px;line-height:1.55}
+.grade{font:700 12px/1 var(--font-mono);padding:4px 9px;border-radius:999px;white-space:nowrap}
+.grade.bad{background:var(--red-bg);color:var(--red)}
+.grade.good{background:var(--green-bg);color:var(--green)}
+.grade.warn{background:var(--amber-bg);color:var(--amber)}
+.metarow{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.pill{font:700 11px/1 var(--font-sans);padding:6px 10px;border-radius:999px;letter-spacing:.02em}
+.pill.pass{background:var(--green-bg);color:var(--green)}
+.pill.fail{background:var(--red-bg);color:var(--red)}
+.pill.flag{background:var(--amber-bg);color:var(--amber)}
+.pill.neutral{background:var(--rule);color:var(--ink-soft)}
+.note{font:13px/1.6 var(--font-sans);color:var(--muted);margin-top:10px}
+.missing{font:12.5px/1.6 var(--font-mono);color:var(--red);margin-top:6px}
+.presetresults{display:grid;grid-template-columns:1fr;gap:12px;margin-top:12px}
+@media(min-width:760px){.presetresults{grid-template-columns:1fr 1fr 1fr}}
+.presetresult{border:1px solid var(--rule);border-radius:8px;padding:12px 14px;background:#fff}
+.presetresult .pn{font:700 12px/1 var(--font-sans);color:var(--accent);margin-bottom:8px;display:flex;justify-content:space-between;align-items:center}
+.presetresult .gr{display:flex;gap:6px;align-items:center;font:13px/1.4 var(--font-sans);color:var(--ink-soft);margin-bottom:8px}
+.presetresult p{font-size:14.5px;line-height:1.5;margin:0}
+.presetresult .rewritetext{margin-top:8px;padding-top:8px;border-top:1px dashed var(--rule)}
+.foot{margin-top:56px;border-top:2px solid var(--ink);padding-top:18px;font:13.5px/1.65 var(--font-sans);color:var(--muted)}
+.foot b{color:var(--ink-soft)}
+.toc{font:14px/1.7 var(--font-sans);color:var(--ink-soft);margin:14px 0}
+.toc a{color:var(--accent-2);text-decoration:none}
+.toc a:hover{text-decoration:underline}
+code{font-family:var(--font-mono);font-size:.92em;background:var(--rule);padding:1px 5px;border-radius:4px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="kicker">readable-or-else</div>
+  <h1>A readability CI gate &mdash; or else, a rewrite</h1>
+  <p class="dek"><b>readable-or-else</b> is a <b>readability CI gate</b> &mdash; a
+  <b>Flesch-Kincaid grade level check in CI</b> that fails a pull request when a page misses its
+  target reading level &mdash; plus an LLM-backed mode that can <b>rewrite text to a 7th grade
+  reading level with an LLM</b> (or any grade you choose) so a failing build doesn't stall on
+  &ldquo;now what.&rdquo; It's built for <b>plain language</b> and <b>accessibility</b> work,
+  including a ready-made <b>WCAG</b> 3.1.5 Reading Level preset, and ships general-purpose: point
+  it at any HTML or text content, not just civic sites.</p>
+  <p class="dek">Measurement is a thin, honest wrapper over
+  <a href="https://github.com/textstat/textstat" target="_blank" rel="noopener">textstat</a>'s
+  Flesch-Kincaid formula &mdash; readable-or-else doesn't reimplement the math, only the policy
+  around it (gate/warn/ratchet, presets, the rewrite loop). Every rewrite below is a real call to
+  an LLM, re-measured with that same formula, and checked against every preset the tool ships.
+  <a href="https://github.com/jimdc/readable-or-else" target="_blank" rel="noopener">Source on GitHub &rarr;</a></p>
+
+  <div class="lede-box">
+    Three named presets ship with readable-or-else, each carrying its citation as data, not a
+    hardcoded assumption (see <code>readable_or_else/presets.py</code>):
+    <div class="presetgrid">
+      
+      <div class="presetcard">
+        <div class="pname">nycsg7</div>
+        <div class="ptarget">target grade &le; 7</div>
+        <div style="margin-top:6px">NYC Web Content Style Guide, &quot;Reading level&quot;: designsystem.nyc.gov/standards/nyc-web-content-style-guide.html — “Try to simplify your content to a seventh grade reading level or lower. We use the Flesch–Kincaid grade level formula.”</div>
+      </div>
+
+      <div class="presetcard">
+        <div class="pname">govuk9</div>
+        <div class="ptarget">target grade &le; 4</div>
+        <div style="margin-top:6px">GOV.UK content design, “Writing for GOV.UK” — targets a reading age of 9. textstat has no reading-age formula, so this preset approximates reading age 9 as Flesch-Kincaid US grade ≤4 (the common age-minus-5 heuristic).</div>
+      </div>
+
+      <div class="presetcard">
+        <div class="pname">wcag-aaa</div>
+        <div class="ptarget">target grade &le; 9 (flag-only)</div>
+        <div style="margin-top:6px">WCAG 3.1.5 Reading Level (AAA): w3.org/WAI/WCAG22/Understanding/reading-level.html — requires a simplified supplement above lower-secondary reading level, not a hard numeric gate. readable-or-else models this as flag-only: it never fails a build on this preset.</div>
+      </div>
+    </div>
+  </div>
+
+  <p class="dek">Below: three well-known public-domain texts, run through <code>--suggest</code>
+  once per preset above &mdash; nine live LLM calls, nine re-measurements, no mocking. Public
+  domain on purpose, so nothing here can be mistaken for a fabricated example.</p>
+</header>
+<hr class="rule">
+<h2>Universal Declaration of Human Rights, Article 1 <span class="n">(United Nations, 1948)</span></h2>
+    <div class="card">
+      <div class="src">Universal Declaration of Human Rights, Article 1</div>
+      <div class="block">
+        <div class="lbl"><span>Original</span><span class="grade bad">grade 7.6</span></div>
+        <p>All human beings are born free and equal in dignity and rights. They are endowed with reason and conscience and should act towards one another in a spirit of brotherhood.</p>
+      </div>
+      <div class="presetresults">
+        
+        <div class="presetresult">
+          <div class="pn"><span>nycsg7</span><span class="grade good">grade 1.5</span></div>
+          <div class="gr">target &le; grade 7</div>
+          <span class="pill pass">meets target</span> <span class="pill pass">entity check: pass</span>
+          
+          <div class="rewritetext"><p>All people are born free. They are equal in worth and rights. They have the power to think and know right from wrong. They should treat each other like brothers and sisters.</p></div>
+        </div>
+
+        <div class="presetresult">
+          <div class="pn"><span>govuk9</span><span class="grade good">grade 1.5</span></div>
+          <div class="gr">target &le; grade 4</div>
+          <span class="pill pass">meets target</span> <span class="pill pass">entity check: pass</span>
+          
+          <div class="rewritetext"><p>All people are born free. All people are equal in worth and rights. They can think and know right from wrong. They should treat each other like family.</p></div>
+        </div>
+
+        <div class="presetresult">
+          <div class="pn"><span>wcag-aaa</span><span class="grade good">grade 5.8</span></div>
+          <div class="gr">target &le; grade 9</div>
+          <span class="pill pass">meets target</span> <span class="pill pass">entity check: pass</span>
+          
+          <div class="rewritetext"><p>All people are born free and equal in dignity and rights. They have reason and conscience and should treat one another as brothers and sisters.</p></div>
+        </div>
+      </div>
+    </div>
+<h2>26 U.S.C. &sect; 61(a) <span class="n">(U.S. Internal Revenue Code &mdash; &ldquo;Gross income defined&rdquo;)</span></h2><p class="dek">The flagship example of dense American legalese &mdash; a single sentence with a fourteen-item enumerated list, and no rewrite below landed at any preset’s target. Simplifying a definitional list like this one, without dropping a category the statute actually defines, may not be possible at these lengths &mdash; a real, reportable limit of the rewrite mode, not a bug.</p>
+    <div class="card">
+      <div class="src">26 U.S.C. § 61(a)</div>
+      <div class="block">
+        <div class="lbl"><span>Original</span><span class="grade bad">grade 43.8</span></div>
+        <p>Except as otherwise provided in this subtitle, gross income means all income from whatever source derived, including (but not limited to) the following items: (1) Compensation for services, including fees, commissions, fringe benefits, and similar items; (2) Gross income derived from business; (3) Gains derived from dealings in property; (4) Interest; (5) Rents; (6) Royalties; (7) Dividends; (8) Annuities; (9) Income from life insurance and endowment contracts; (10) Pensions; (11) Income from discharge of indebtedness; (12) Distributive share of partnership gross income; (13) Income in respect of a decedent; and (14) Income from an interest in an estate or trust.</p>
+      </div>
+      <div class="presetresults">
+        
+        <div class="presetresult">
+          <div class="pn"><span>nycsg7</span><span class="grade bad">grade 22.5</span></div>
+          <div class="gr">target &le; grade 7</div>
+          <span class="pill fail">over target</span> <span class="pill pass">entity check: pass</span>
+          
+          <div class="rewritetext"><p>Unless this subtitle says otherwise, gross income means all income from any source. This includes, but is not limited to, these items: (1) Pay for services, such as fees, commissions, fringe benefits, and similar items; (2) Gross income from a business; (3) Gains from buying or selling property; (4) Interest; (5) Rent; (6) Royalties; (7) Dividends; (8) Annuities; (9) Income from life insurance and endowment contracts; (10) Pensions; (11) Income from having a debt canceled; (12) A partner&#x27;s share of a partnership&#x27;s gross income; (13) Income owed to a person who has died; and (14) Income from a share in an estate or trust.</p></div>
+        </div>
+
+        <div class="presetresult">
+          <div class="pn"><span>govuk9</span><span class="grade bad">grade 21.0</span></div>
+          <div class="gr">target &le; grade 4</div>
+          <span class="pill fail">over target</span> <span class="pill pass">entity check: pass</span>
+          
+          <div class="rewritetext"><p>Unless this subtitle says something else, gross income means all money you earn, no matter where it comes from. This includes, but is not limited to: (1) Pay for work, such as fees, tips, and job perks; (2) Money you earn from a business; (3) Money you make when you sell things; (4) Interest; (5) Rent; (6) Royalties; (7) Dividends; (8) Annuities; (9) Money from life insurance and endowment plans; (10) Pensions; (11) Money from having a debt wiped out; (12) Your share of a partnership&#x27;s income; (13) Income owed to a person who has died; and (14) Income from a share in an estate or trust.</p></div>
+        </div>
+
+        <div class="presetresult">
+          <div class="pn"><span>wcag-aaa</span><span class="grade warn">grade 21.8</span></div>
+          <div class="gr">target &le; grade 9</div>
+          <span class="pill flag">flagged, not failed</span> <span class="pill pass">entity check: pass</span>
+          
+          <div class="rewritetext"><p>Unless this subtitle says otherwise, gross income means all income from any source. This includes, but is not limited to, the following: (1) Pay for services, such as fees, commissions, fringe benefits, and similar items; (2) Gross income from a business; (3) Gains from dealing in property; (4) Interest; (5) Rents; (6) Royalties; (7) Dividends; (8) Annuities; (9) Income from life insurance and endowment contracts; (10) Pensions; (11) Income from canceled debt; (12) A partner&#x27;s share of the partnership&#x27;s gross income; (13) Income owed to someone who has died; and (14) Income from a share in an estate or trust.</p></div>
+        </div>
+      </div>
+    </div>
+<h2>U.S. Constitution, Fourteenth Amendment, Section 1</h2>
+    <div class="card">
+      <div class="src">U.S. Constitution, 14th Amendment, §1</div>
+      <div class="block">
+        <div class="lbl"><span>Original</span><span class="grade bad">grade 19.0</span></div>
+        <p>All persons born or naturalized in the United States, and subject to the jurisdiction thereof, are citizens of the United States and of the State wherein they reside. No State shall make or enforce any law which shall abridge the privileges or immunities of citizens of the United States; nor shall any State deprive any person of life, liberty, or property, without due process of law; nor deny to any person within its jurisdiction the equal protection of the laws.</p>
+      </div>
+      <div class="presetresults">
+        
+        <div class="presetresult">
+          <div class="pn"><span>nycsg7</span><span class="grade good">grade 6.0</span></div>
+          <div class="gr">target &le; grade 7</div>
+          <span class="pill pass">meets target</span> <span class="pill pass">entity check: pass</span>
+          
+          <div class="rewritetext"><p>If you are born in the United States, you are a citizen. If you become a citizen through the legal process, you are also a citizen. This is true as long as you are under U.S. rule. You are a citizen of the United States and of the State where you live.
+
+No State can make or enforce a law that takes away the rights of U.S. citizens. No State can take away a person&#x27;s life, freedom, or property without fair legal steps. No State can deny fair and equal treatment under the law to any person in its area.</p></div>
+        </div>
+
+        <div class="presetresult">
+          <div class="pn"><span>govuk9</span><span class="grade good">grade 3.7</span></div>
+          <div class="gr">target &le; grade 4</div>
+          <span class="pill pass">meets target</span> <span class="pill pass">entity check: pass</span>
+          
+          <div class="rewritetext"><p>If you are born in the United States, you are a citizen. If you become a citizen here, you are one too. You must also follow its laws. You are a citizen of the United States. You are also a citizen of the State where you live.
+
+No State can make a law that takes away the rights of United States citizens. No State can take away a person&#x27;s life. No State can take away a person&#x27;s freedom. No State can take away what a person owns. It must be done in a fair way, by law. Every person in a State must get the same fair treatment under the law.</p></div>
+        </div>
+
+        <div class="presetresult">
+          <div class="pn"><span>wcag-aaa</span><span class="grade good">grade 8.9</span></div>
+          <div class="gr">target &le; grade 9</div>
+          <span class="pill pass">meets target</span> <span class="pill pass">entity check: pass</span>
+          
+          <div class="rewritetext"><p>All people born or naturalized in the United States, and under its laws, are citizens of the United States and of the State where they live. No State can make or enforce any law that takes away the rights of citizens of the United States. No State can take away any person&#x27;s life, freedom, or property without fair legal steps. No State can deny any person in its area the equal protection of the laws.</p></div>
+        </div>
+      </div>
+    </div>
+<hr class="rule rule--light">
+<h2>More: the crol-list showcase <span class="n">(readable-or-else's first real client)</span></h2>
+<p class="dek">readable-or-else was scoped against <a href="https://github.com/jimdc/crol-list" target="_blank" rel="noopener">crol-list</a>'s
+own pages as its first real corpus. See the ten genuinely-hardest passages from its
+<code>about.html</code> and <code>data.html</code>, measured and rewritten live against the
+<code>nycsg7</code> preset &mdash; <a href="crol-list-rewrites.html">the full before/after showcase &rarr;</a></p>
+<div class="foot">
+  <b>Rewrites shown on this page are LLM suggestions, not accepted edits.</b> Each is re-measured
+  with the same Flesch-Kincaid formula used for gating, and checked for meaning preservation
+  (numbers, URLs, and proper nouns in the original must also appear in the candidate) &mdash; a
+  heuristic, not a semantic-equivalence proof. A human should read every rewrite before it ships.
+  <code>--suggest</code> never auto-applies a rewrite to a file. See
+  <a href="https://github.com/jimdc/readable-or-else" target="_blank" rel="noopener">readable-or-else on GitHub</a> for the
+  full tool, its limits, and its test suite.
+</div>
+</div>
+</body>
+</html>
