@@ -3,13 +3,16 @@
 import argparse
 import sys
 
+from .apply import fix_html
 from .baseline import load_baseline, new_baseline, save_baseline, tighten_entry
+from .denial_rules import DenialConfig, DEFAULT_MAX_LENGTH_RATIO, DEFAULT_MIN_LENGTH_RATIO
 from .extract import extract_visible_text, DomRenderedNotImplemented, extract_dom_rendered
+from .fix import FileFixReport, fix_text
 from .gate import evaluate_file, overall_passed
 from .llm import LLMClient, LLMConfig, RewriteUnavailable, rewrite_passage
 from .measure import measure
 from .presets import custom_preset, get_preset
-from .report import format_results, rewrite_suggestion_markdown
+from .report import format_fix_report, format_results, rewrite_suggestion_markdown
 
 HTML_EXTENSIONS = (".html", ".htm")
 
@@ -57,6 +60,18 @@ def build_parser() -> argparse.ArgumentParser:
     baseline_cmd.add_argument("--lang", default="en")
     baseline_cmd.add_argument("--extract", default="html", choices=["html", "dom-rendered"])
     baseline_cmd.add_argument("-o", "--output", required=True)
+
+    fix = sub.add_parser(
+        "fix", help="rewrite over-target passages via the configured LLM and apply accepted candidates in place"
+    )
+    fix.add_argument("files", nargs="+")
+    fix.add_argument("--preset", default="nycsg7", choices=["nycsg7", "govuk9", "wcag-aaa", "custom"])
+    fix.add_argument("--max-grade", type=float, default=None)
+    fix.add_argument("--lang", default="en")
+    fix.add_argument("--max-retries", type=int, default=1, help="bounded retry-with-feedback attempts after a denial")
+    fix.add_argument("--min-length-ratio", type=float, default=DEFAULT_MIN_LENGTH_RATIO)
+    fix.add_argument("--max-length-ratio", type=float, default=DEFAULT_MAX_LENGTH_RATIO)
+    fix.add_argument("--format", default="table", choices=["json", "table"])
 
     return parser
 
@@ -130,13 +145,58 @@ def run_baseline(args) -> int:
     return 0
 
 
-def main(argv=None) -> int:
+def run_fix(args, llm_client=None) -> int:
+    preset = resolve_preset(args)
+    if preset.max_grade is None:
+        raise SystemExit("fix mode requires a preset with a numeric max_grade")
+
+    if llm_client is None:
+        try:
+            llm_client = LLMClient(LLMConfig.from_env())
+        except RewriteUnavailable as exc:
+            raise SystemExit(f"fix mode requires a configured LLM: {exc}") from exc
+
+    denial_config = DenialConfig(
+        min_length_ratio=args.min_length_ratio, max_length_ratio=args.max_length_ratio
+    )
+
+    reports = []
+    any_denied = False
+    for path in args.files:
+        with open(path, encoding="utf-8") as f:
+            raw = f.read()
+
+        skipped = 0
+        if path.endswith(HTML_EXTENSIONS):
+            new_content, results, skipped = fix_html(
+                raw, preset.max_grade, args.lang, llm_client, denial_config, args.max_retries
+            )
+        else:
+            new_content, results = fix_text(
+                raw, preset.max_grade, args.lang, llm_client, denial_config, args.max_retries
+            )
+
+        changed = new_content != raw
+        if changed:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(new_content)
+
+        any_denied = any_denied or any(not r.applied for r in results) or skipped > 0
+        reports.append(FileFixReport(path=path, changed=changed, results=results, skipped_nested_markup=skipped))
+
+    print(format_fix_report(reports, args.format))
+    return 1 if any_denied else 0
+
+
+def main(argv=None, llm_client=None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     if args.command == "check":
         return run_check(args)
     if args.command == "baseline":
         return run_baseline(args)
+    if args.command == "fix":
+        return run_fix(args, llm_client=llm_client)
     parser.error(f"unknown command {args.command!r}")
     return 2
 
