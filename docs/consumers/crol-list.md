@@ -9,8 +9,8 @@ backlog card (`w6-11-standards-as-code.md`) with the real component.
 
 Every one of crol-list's 6 shipped HTML pages currently misses FK grade 7,
 by 0.8 grades (`stats.html`, closest) to 7.8 grades (`data.html`, furthest) —
-see the research report this component was scoped from
-(`reading-gates-k4/report.md` §1a) for the full measured baseline. A hard
+see a July 2026 measured baseline of the crol-list pages, from the research
+this component was scoped from, for the full numbers. A hard
 `--mode gate --max-grade 7` as originally sketched in the backlog card would
 fail 100% of pages immediately with no path to green. Ratchet mode commits
 today's scores as a ceiling and fails only on regression, with grade 7
