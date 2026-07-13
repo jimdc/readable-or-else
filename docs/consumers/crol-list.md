@@ -100,11 +100,40 @@ on `data.html` and `index.html`'s static chrome first (furthest over
 target), not on `i18n.js` UI strings — those are already near grade 7
 (6.55–6.71 across the full en dictionary) and are not the source of the gap.
 
-## 5. Optional: rewrite suggestions on PRs
+## 5. Recommended: run `fix`/`--suggest` locally, let CI only measure
 
-Once the ratchet gate is stable, add `--suggest` to a manually-triggered or
-label-gated job (it costs an LLM call per over-target passage, so keep it
-out of the default per-PR run):
+The cheapest and most honest way to close the remaining 37 (104 - 67, see §7
+below) over-target passages is to **never call an LLM from crol-list's CI at
+all**. Per the main README's "Backends" section:
+
+1. Locally, point readable-or-else at a flat-plan CLI (the `command` backend
+   — `READABLE_OR_ELSE_LLM_BACKEND=command`, `READABLE_OR_ELSE_LLM_CMD="claude
+   -p --model sonnet"` or similar) and run `fix` — free at the margin, and
+   every rewrite gets eyeballed before it lands.
+2. Commit the rewritten HTML alongside a re-run of step 4's baseline command
+   for the pages that improved.
+3. The CI job in §3 above never changes: `check --mode ratchet` re-measures
+   the committed pages deterministically against the committed baseline.
+   That re-measurement **is** the proof the local `fix` run actually hit
+   grade 7 — CI doesn't need to trust the local step, because it recomputes
+   the grade itself from what got committed.
+
+Grade-level rewriting on crol-list's prose (city-services copy, not legal
+judgment calls) is mechanical enough that a flat-plan CLI or a local model is
+usually sufficient — reserve a metered frontier model for a passage that
+keeps failing meaning-preservation on the cheaper tiers. See the README's
+"Choosing a backend: a cost ladder" for the full ordering.
+
+## 6. Optional: rewrite suggestions inside CI
+
+Calling an LLM from CI directly is the **exception** under the workflow
+above, not the norm — only reach for it to surface suggestions on a PR
+nobody's rewritten locally yet. It also runs into a real constraint: hosted
+CI can't authenticate as your personal Claude Pro/Max or ChatGPT session, so
+the flat-plan `command` backend generally isn't usable here (unless the CLI
+supports its own CI-scoped, non-interactive credentials) — fall back to the
+`http` backend against a cheap metered model instead, gated behind a label so
+it's not on the default per-PR run:
 
 ```yaml
       - name: Suggest simplifications
@@ -113,11 +142,18 @@ out of the default per-PR run):
           READABLE_OR_ELSE_LLM_BASE: ${{ secrets.READABLE_OR_ELSE_LLM_BASE }}
           READABLE_OR_ELSE_LLM_KEY: ${{ secrets.READABLE_OR_ELSE_LLM_KEY }}
           READABLE_OR_ELSE_LLM_MODEL: ${{ secrets.READABLE_OR_ELSE_LLM_MODEL }}
+          READABLE_OR_ELSE_MAX_CALLS: "25"
         run: |
           readable-or-else check data.html index.html \
             --preset nycsg7 --mode warn --suggest --format json \
             > readable-or-else-suggestions.json
 ```
+
+`READABLE_OR_ELSE_MAX_CALLS` caps how many rewrite calls this job can make in
+one run (default 50 if unset) — a denial-of-wallet guard against a
+misconfigured or unexpectedly large batch running up a bill against a
+metered endpoint; keep it at or below the number of passages you actually
+expect to suggest for.
 
 Post `readable-or-else-suggestions.json`'s `rewrite` entries as PR review
 comments in a follow-up step (any PR-comment action that can read JSON and
@@ -125,7 +161,7 @@ call the GitHub API works — this repo doesn't ship one, to stay
 CI-provider-agnostic). Never wire this to auto-commit the rewrite; a human
 must accept the diff.
 
-## 6. Mixed-content rewriting closes most of the earlier eligibility gap
+## 7. Mixed-content rewriting closes most of the earlier eligibility gap
 
 The first production run of `fix`/`--suggest` against crol-list (PR #17)
 found that most of its over-target prose was structurally ineligible: `fix`

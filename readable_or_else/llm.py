@@ -1,9 +1,11 @@
 """LLM-backed rewrite: the shared primitive behind both `--suggest` and `fix`.
 
-Calls a configurable OpenAI-compatible chat-completions endpoint to produce a
-candidate rewrite of a failing passage at the target grade, re-measures the
-candidate with the same wrapped textstat formulas used for gating, and rejects
-it if it is still over target or fails a meaning-preservation heuristic check.
+Produces a candidate rewrite of a failing passage at the target grade,
+re-measures the candidate with the same wrapped textstat formulas used for
+gating, and rejects it if it is still over target or fails a
+meaning-preservation heuristic check. This module is backend-agnostic: it
+only ever calls `client.complete(system, user) -> str` on whatever backend
+`client_from_env()` (or a caller) hands it — see "Backends" below.
 
 `rewrite_passage` below (the `--suggest` path) never writes anywhere — its
 candidate is only ever emitted as a suggestion for a human to accept. Applying
@@ -11,9 +13,27 @@ a rewrite in place is a separate, opt-in mode: see fix.py and apply.py, which
 build on `check_meaning_preserved` here as one of several denial rules
 (denial_rules.py) that gate whether a candidate may be auto-applied.
 
-Provider-agnostic by design (env-configured base URL/key/model) so this works
-against OpenAI itself, Anthropic-via-OpenAI-compat shims, or a local proxy —
-this is a public component, not tied to one vendor.
+Backends (READABLE_OR_ELSE_LLM_BACKEND):
+  - "http" (default): a configurable OpenAI-compatible chat-completions
+    endpoint (`LLMClient`/`LLMConfig`). Provider-agnostic by design — OpenAI
+    itself, an Anthropic-compatible shim, or a local proxy — but billed per
+    call by whatever's on the other end of the URL.
+  - "command" (`CommandLLMClient`/`CommandLLMConfig`): shells out to a
+    configured CLI command per passage instead. This is the fit for
+    subscription/flat-plan tools (a "claude -p ..." or similar CLI reachable
+    only through its own harness, not an API key) and local models — the
+    per-call *cost* is zero, though a CLI cold-starts a process per passage so
+    it's slower than a persistent HTTP connection.
+
+Both backends duck-type the same `complete(system, user) -> str` shape, so
+everything downstream (denial rules, retry-with-feedback, re-measurement) is
+backend-agnostic and never branches on which one is active.
+
+`client_from_env()` also wraps whichever backend it builds in a `BudgetedClient`
+enforcing READABLE_OR_ELSE_MAX_CALLS (default 50) — a denial-of-wallet guard:
+a runaway loop is a risk on a metered endpoint (surprise bill) and on a
+flat-plan CLI alike (a locked-up terminal), so the cap applies identically to
+both backends rather than trying to estimate cost, which is backend-specific.
 
 Honest limits (read before trusting --suggest output):
   - English only in v1.
@@ -29,9 +49,12 @@ Honest limits (read before trusting --suggest output):
 import json
 import os
 import re
+import shlex
+import subprocess
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from typing import Protocol
 
 from .measure import measure
 
@@ -63,6 +86,19 @@ MIXED_CONTENT_SYSTEM_PROMPT = (
 
 class RewriteUnavailable(RuntimeError):
     """Raised when the LLM endpoint isn't configured or the call fails."""
+
+
+BUDGET_EXCEEDED_PREFIX = "call budget exceeded"
+
+
+class CallBudgetExceeded(RewriteUnavailable):
+    """Raised by `BudgetedClient` once READABLE_OR_ELSE_MAX_CALLS is reached."""
+
+
+class RewriteClient(Protocol):
+    """The only shape rewrite_passage/fix.py depend on — either backend satisfies it."""
+
+    def complete(self, system: str, user: str) -> str: ...
 
 
 @dataclass
@@ -121,6 +157,134 @@ class LLMClient:
             ) from exc
 
 
+DEFAULT_COMMAND_TIMEOUT = 60.0
+
+
+@dataclass
+class CommandLLMConfig:
+    command: str
+    timeout: float = DEFAULT_COMMAND_TIMEOUT
+
+    @classmethod
+    def from_env(cls) -> "CommandLLMConfig":
+        command = os.environ.get("READABLE_OR_ELSE_LLM_CMD")
+        if not command:
+            raise RewriteUnavailable(
+                "READABLE_OR_ELSE_LLM_BACKEND=command requires READABLE_OR_ELSE_LLM_CMD, e.g. "
+                "'claude -p --model sonnet', 'llm -m ollama:llama3.1', or 'ollama run llama3.1'."
+            )
+        timeout_raw = os.environ.get("READABLE_OR_ELSE_LLM_TIMEOUT")
+        timeout = float(timeout_raw) if timeout_raw else DEFAULT_COMMAND_TIMEOUT
+        return cls(command=command, timeout=timeout)
+
+
+class CommandLLMClient:
+    """Shells out to a configured command as the rewrite backend, one subprocess per passage.
+
+    Built for flat-plan CLIs (subscription tools reachable only through their own
+    harness, not an API key) and local models — the per-call cost is zero, unlike
+    `LLMClient`, which pays per token to whatever's behind the URL. The tradeoff
+    is latency: a CLI cold-starts a process per passage, so a large file runs
+    slower here than against a persistent HTTP connection, and success depends on
+    that CLI's own auth/session already being valid in this shell.
+
+    Shell-safety: the passage text is never interpolated into the command string —
+    it is written to the subprocess's stdin only, and `READABLE_OR_ELSE_LLM_CMD` is
+    split with `shlex.split` and run without `shell=True`, so nothing in the
+    passage or the model's own output can inject an extra shell command.
+    """
+
+    def __init__(self, config: CommandLLMConfig):
+        self.config = config
+
+    def complete(self, system: str, user: str) -> str:
+        prompt = f"{system}\n\n{user}"
+        try:
+            argv = shlex.split(self.config.command)
+        except ValueError as exc:
+            raise RewriteUnavailable(
+                f"backend_error: could not parse READABLE_OR_ELSE_LLM_CMD {self.config.command!r}: {exc}"
+            ) from exc
+        if not argv:
+            raise RewriteUnavailable("backend_error: READABLE_OR_ELSE_LLM_CMD is empty")
+
+        try:
+            result = subprocess.run(
+                argv,
+                input=prompt.encode("utf-8"),
+                capture_output=True,
+                timeout=self.config.timeout,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RewriteUnavailable(
+                f"backend_error: command timed out after {self.config.timeout:.0f}s: "
+                f"{self.config.command!r}"
+            ) from exc
+        except OSError as exc:
+            raise RewriteUnavailable(
+                f"backend_error: could not run command {self.config.command!r}: {exc}"
+            ) from exc
+
+        if result.returncode != 0:
+            stderr = result.stderr.decode("utf-8", errors="replace").strip()
+            raise RewriteUnavailable(
+                f"backend_error: command {self.config.command!r} exited {result.returncode}: {stderr}"
+            )
+
+        return result.stdout.decode("utf-8", errors="replace").strip()
+
+
+DEFAULT_MAX_CALLS = 50
+
+
+class BudgetedClient:
+    """Wraps any rewrite client and enforces a hard per-invocation call ceiling.
+
+    This is the only lever for denial-of-wallet safety: cost estimation is
+    backend-specific (dollars-per-token for `LLMClient`, meaningless for a flat-plan
+    `CommandLLMClient`), so instead of trying to price a run, this caps how many
+    calls it may make at all. Once the ceiling is hit, every further call raises
+    immediately — no subprocess spawned, no request sent — so remaining passages
+    degrade cleanly to the same "denied" reporting path as any other backend error.
+    """
+
+    def __init__(self, client: RewriteClient, max_calls: int = DEFAULT_MAX_CALLS):
+        self.client = client
+        self.max_calls = max_calls
+        self.calls_made = 0
+
+    def complete(self, system: str, user: str) -> str:
+        if self.calls_made >= self.max_calls:
+            raise CallBudgetExceeded(
+                f"{BUDGET_EXCEEDED_PREFIX}: READABLE_OR_ELSE_MAX_CALLS={self.max_calls} reached "
+                "for this invocation — raise it or split the run to process the rest"
+            )
+        self.calls_made += 1
+        return self.client.complete(system, user)
+
+
+def client_from_env(timeout: float = 30.0) -> "BudgetedClient":
+    """Build the configured rewrite backend from environment variables.
+
+    READABLE_OR_ELSE_LLM_BACKEND selects the backend ("http", the default, or
+    "command" — see the module docstring). The result is always wrapped in a
+    `BudgetedClient` honoring READABLE_OR_ELSE_MAX_CALLS, regardless of backend.
+    """
+    backend = os.environ.get("READABLE_OR_ELSE_LLM_BACKEND", "http")
+    if backend == "http":
+        client: RewriteClient = LLMClient(LLMConfig.from_env(), timeout=timeout)
+    elif backend == "command":
+        client = CommandLLMClient(CommandLLMConfig.from_env())
+    else:
+        raise RewriteUnavailable(
+            f"unknown READABLE_OR_ELSE_LLM_BACKEND={backend!r}; expected 'http' or 'command'"
+        )
+
+    max_calls_raw = os.environ.get("READABLE_OR_ELSE_MAX_CALLS")
+    max_calls = int(max_calls_raw) if max_calls_raw else DEFAULT_MAX_CALLS
+    return BudgetedClient(client, max_calls)
+
+
 _NUMBER_RE = re.compile(r"\d[\d,.]*")
 _URL_RE = re.compile(r"https?://\S+")
 _URL_TRAILING_PUNCT = ".,;:!?)\"'"
@@ -167,7 +331,7 @@ def rewrite_passage(
     text: str,
     target_grade: float,
     language: str,
-    client: LLMClient,
+    client: RewriteClient,
 ) -> RewriteResult:
     before = measure(text, language=language)
 

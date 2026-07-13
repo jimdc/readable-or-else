@@ -6,6 +6,7 @@ import tempfile
 import unittest
 
 from readable_or_else.cli import main
+from readable_or_else.llm import BudgetedClient
 from tests.fakes import FakeLLMClient
 
 HARD_SENTENCE = (
@@ -213,6 +214,25 @@ class TestCliFix(unittest.TestCase):
             with open(path, encoding="utf-8") as f:
                 self.assertEqual(f.read(), original)
             self.assertEqual(len(client.calls), 0)
+
+    def test_fix_reports_call_budget_exceeded_and_exits_nonzero(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(tmp, "hard.html", f"<p>{HARD_SENTENCE}</p>")
+            original = open(path, encoding="utf-8").read()
+            inner = FakeLLMClient(lambda system, user: GOOD_REWRITE)
+            client = BudgetedClient(inner, max_calls=0)
+
+            out = io.StringIO()
+            err = io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                code = main(["fix", path, "--preset", "nycsg7"], llm_client=client)
+
+            self.assertEqual(code, 1)
+            with open(path, encoding="utf-8") as f:
+                self.assertEqual(f.read(), original)
+            self.assertEqual(len(inner.calls), 0)
+            self.assertIn("budget_exceeded", out.getvalue())
+            self.assertIn("call budget exceeded", err.getvalue())
 
 
 if __name__ == "__main__":

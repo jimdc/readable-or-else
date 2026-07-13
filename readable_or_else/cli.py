@@ -14,7 +14,7 @@ from .denial_rules import (
 from .extract import extract_visible_text, DomRenderedNotImplemented, extract_dom_rendered
 from .fix import FileFixReport, fix_text
 from .gate import evaluate_file, overall_passed
-from .llm import LLMClient, LLMConfig, RewriteUnavailable, rewrite_passage
+from .llm import BUDGET_EXCEEDED_PREFIX, RewriteUnavailable, client_from_env, rewrite_passage
 from .measure import measure
 from .presets import custom_preset, get_preset
 from .report import format_fix_report, format_results, rewrite_suggestion_markdown
@@ -111,7 +111,7 @@ def run_check(args) -> int:
         ]
         if over_target:
             try:
-                client = LLMClient(LLMConfig.from_env())
+                client = client_from_env()
             except RewriteUnavailable as exc:
                 print(f"--suggest requested but unavailable: {exc}", file=sys.stderr)
                 client = None
@@ -127,6 +127,14 @@ def run_check(args) -> int:
         for path, rewrite in rewrites.items():
             print(rewrite_suggestion_markdown(path, rewrite))
             print()
+
+    budget_exceeded = sum(1 for r in rewrites.values() if BUDGET_EXCEEDED_PREFIX in r.reason)
+    if budget_exceeded:
+        print(
+            f"call budget exceeded: {budget_exceeded} of {len(rewrites)} over-target "
+            "passage(s) left un-suggested (raise READABLE_OR_ELSE_MAX_CALLS or split the run)",
+            file=sys.stderr,
+        )
 
     return 0 if overall_passed(results) else 1
 
@@ -162,7 +170,7 @@ def run_fix(args, llm_client=None) -> int:
 
     if llm_client is None:
         try:
-            llm_client = LLMClient(LLMConfig.from_env())
+            llm_client = client_from_env()
         except RewriteUnavailable as exc:
             raise SystemExit(f"fix mode requires a configured LLM: {exc}") from exc
 
@@ -197,6 +205,15 @@ def run_fix(args, llm_client=None) -> int:
         reports.append(FileFixReport(path=path, changed=changed, results=results, skipped_nested_markup=skipped))
 
     print(format_fix_report(reports, args.format))
+
+    budget_exceeded = sum(1 for r in reports for p in r.results if p.rule == "budget_exceeded")
+    if budget_exceeded:
+        print(
+            f"call budget exceeded: {budget_exceeded} passage(s) left un-fixed "
+            "(raise READABLE_OR_ELSE_MAX_CALLS or split the run)",
+            file=sys.stderr,
+        )
+
     return 1 if any_denied else 0
 
 

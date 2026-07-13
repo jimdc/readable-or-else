@@ -155,6 +155,10 @@ export READABLE_OR_ELSE_LLM_MODEL="gpt-4o-mini"
 readable-or-else check about.html --preset nycsg7 --suggest --format json
 ```
 
+This example uses the default HTTP backend — see [Backends](#backends) below
+for the `command` backend (flat-plan CLIs, local models) and how to choose
+between them.
+
 `READABLE_OR_ELSE_LLM_BASE` is deliberately provider-agnostic — point it at
 OpenAI, an Anthropic-compatible shim, or a local proxy. This is a public
 component; it shouldn't assume one vendor.
@@ -197,6 +201,10 @@ export READABLE_OR_ELSE_LLM_MODEL="gpt-4o-mini"
 
 readable-or-else fix about.html data.html --preset nycsg7
 ```
+
+For local `fix` runs, a flat-plan CLI is usually a better fit than a metered
+endpoint — see [Backends](#backends), especially "The recommended workflow:
+local fix, CI verify."
 
 For each file, `fix` finds every *leaf block element* (a `<p>`, `<li>`,
 heading, table cell, etc.) that measures over the preset's target grade,
@@ -290,6 +298,12 @@ The intended shape: `fix` runs first and commits its accepted rewrites to
 the PR branch (or opens a small auto-fix PR of its own), then `check` gates
 whatever is left — same two-step split as `eslint --fix && eslint`.
 
+This recipe calls the LLM from inside CI, which is the pattern [Backends](#backends)
+recommends treating as the exception rather than the default — see "The
+recommended workflow: local fix, CI verify" there for the cheaper, LLM-free
+alternative (run `fix` locally against a flat-plan CLI, commit the result,
+and let this CI job's `check` step do nothing but re-measure).
+
 ```yaml
 name: readable-or-else
 on: pull_request
@@ -330,6 +344,120 @@ its job is to apply what it safely can, not to gate; `check` afterward is
 still the gate. Swap the commit-back step for
 `peter-evans/create-pull-request` if you'd rather land auto-fixes as their
 own reviewable PR instead of amending the triggering one.
+
+## Backends
+
+`--suggest` and `fix` share the same rewrite backend, selected by
+`READABLE_OR_ELSE_LLM_BACKEND`:
+
+| Backend | `READABLE_OR_ELSE_LLM_BACKEND` | Config | Cost model |
+|---|---|---|---|
+| HTTP (default) | `http` (or unset) | `READABLE_OR_ELSE_LLM_BASE` / `_MODEL` / `_KEY` | Billed per call by whatever's behind the URL |
+| Command | `command` | `READABLE_OR_ELSE_LLM_CMD` (+ optional `READABLE_OR_ELSE_LLM_TIMEOUT`, default 60s) | Zero marginal cost against a flat-plan CLI or local model |
+
+### `command`: shell out to a CLI instead of an HTTP endpoint
+
+```bash
+export READABLE_OR_ELSE_LLM_BACKEND="command"
+export READABLE_OR_ELSE_LLM_CMD="claude -p --model sonnet"   # or: llm -m ollama:llama3.1 / ollama run llama3.1
+
+readable-or-else fix about.html --preset nycsg7
+```
+
+readable-or-else runs `READABLE_OR_ELSE_LLM_CMD` once per over-target passage:
+it writes the prompt (system instructions + passage) to the subprocess's
+**stdin only** — never interpolated into the command string, so nothing in
+the passage or the model's own output can inject an extra shell command — and
+reads the rewrite back from stdout. A nonzero exit or a timeout
+(`READABLE_OR_ELSE_LLM_TIMEOUT`) is treated exactly like an HTTP failure: a
+denial with a `backend_error` reason, going through the same reporting path
+`--suggest`/`fix` already use for any unavailable backend.
+
+This is what makes a **subscription/flat-plan tool** usable at all: Claude
+Pro/Max, a ChatGPT plan, or any other flat-rate assistant is reachable only
+through its own CLI or harness, not an API key, so the `http` backend's
+OpenAI-compatible request can't reach it. Point `READABLE_OR_ELSE_LLM_CMD` at
+that CLI's non-interactive/print mode instead, and the marginal cost of every
+rewrite becomes zero (a subprocess, not a billed token).
+
+### Choosing a backend: a cost ladder
+
+Grade-level rewriting is a fairly mechanical task — shorten sentences, swap
+jargon, preserve numbers/links/names — so it rarely needs a frontier model's
+judgment. Cheapest first, in the order worth trying:
+
+1. **Flat-plan CLI** (`command` backend against Claude Pro/Max, a ChatGPT
+   plan, etc.) — free at the margin once you're already paying for the
+   subscription. Best fit for local `fix` runs and pre-commit hooks.
+2. **Local models** (`command` backend against `ollama run ...` or similar) —
+   also free; quality varies by model and how demanding the passage is, so
+   it's worth spot-checking harder prose.
+3. **Cheap metered models** (`http` backend, a haiku-class/mini-class model) —
+   cents per passage; the default recommendation for CI or anywhere a
+   flat-plan CLI isn't available.
+4. **Frontier metered models** (`http` backend, a top-tier model) — last
+   resort, reserved for passages where the rewrite is a genuine judgment call
+   (dense legal/technical prose, ambiguous meaning-preservation trade-offs),
+   not the default for routine grade-level simplification.
+
+Default `--suggest`/`fix` to tier 1 or 2 locally, and tier 3 in CI, unless a
+specific passage is actually failing on the cheaper tiers.
+
+### The recommended workflow: local fix, CI verify
+
+The cheapest and most honest way to run this tool end-to-end: **do the LLM
+work locally; let CI only measure.**
+
+1. Locally, run `fix` (or `--suggest` and hand-apply) against a `command`
+   backend on a flat-plan CLI — free, and every rewrite gets eyeballed before
+   it's committed.
+2. Commit the rewritten prose alongside a tightened `baseline`
+   (`readable-or-else baseline ... -o reading-level-baseline.json`).
+3. CI's `check --mode ratchet` step never touches an LLM at all — it
+   re-measures the committed text deterministically against the committed
+   baseline. That re-measurement **is** the proof the local rewrite actually
+   hit its target grade: CI doesn't have to trust that the LLM step ran
+   honestly, because it recomputes the grade itself, from scratch, over what
+   got committed.
+
+Under this contract, an LLM call inside CI (a label-gated `--suggest` job, per
+[`docs/consumers/crol-list.md`](docs/consumers/crol-list.md)) is the
+**exception**, not the norm — reserved for surfacing suggestions on a PR
+nobody's rewritten locally yet, not for routine gating. It also sidesteps the
+CI caveat below.
+
+### The CI caveat: hosted CI can't use your personal plan
+
+A flat-plan CLI's cost model depends on **your own interactive login** to
+that subscription — hosted CI runners can't inherit it. If a CI job needs to
+call `--suggest` or `fix` directly, rather than relying on the local-fix/CI-verify
+contract above:
+
+- The `command` backend still works in CI, but only against something CI
+  itself can authenticate: a local/self-hosted model, or a CLI configured
+  with its own CI-scoped credentials — not your personal Pro/Max session.
+- The `http` backend against a cheap metered model (tier 3 above) is usually
+  the simpler CI answer: pass `READABLE_OR_ELSE_LLM_BASE`/`_KEY`/`_MODEL` as
+  repo secrets, and keep `READABLE_OR_ELSE_MAX_CALLS` (below) conservative so
+  a misconfigured job can't run up an unexpected bill.
+- Gate CI's LLM steps behind a label or manual trigger rather than running
+  them on every PR — the ratchet gate itself is free and deterministic; only
+  pay for a rewrite when someone's actually asked for one.
+
+### Call budget: `READABLE_OR_ELSE_MAX_CALLS`
+
+Every backend is wrapped in a hard per-invocation ceiling on how many rewrite
+calls it may make — `READABLE_OR_ELSE_MAX_CALLS` (default 50). This is a
+denial-of-wallet guard, not a cost estimate: pricing a run is
+backend-specific (dollars-per-token for `http`, meaningless for a flat-plan
+`command`), so instead of trying to price it, readable-or-else just caps how
+many calls can happen at all. A runaway `fix` over a huge file is a real risk
+either way — a surprise bill against a metered endpoint, or a terminal locked
+up spawning CLI subprocesses against a local model. Once the ceiling is hit,
+every remaining passage degrades cleanly: no further call is made, and the
+result reports a `call budget exceeded` reason through the same path as any
+other backend failure, so `fix`'s exit code still reflects the passages left
+over-target and `--suggest`'s output still lists what wasn't attempted.
 
 ## Limits (v1)
 
