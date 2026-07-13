@@ -1,9 +1,15 @@
-# reading-gate
+# readable-or-else
 
-A CI gate for readability, plus an LLM-backed rewrite mode that proposes a
-simplified version of any passage that misses its target grade.
+**readable-or-else** is a **readability CI gate** — a **Flesch-Kincaid grade
+level check in CI** that fails a pull request when a page misses its target
+reading level — plus an LLM-backed mode that can **rewrite text to a 7th
+grade reading level with an LLM** (or any grade you choose) so a failing
+build doesn't stall on "now what." It's built for **plain language** and
+**accessibility** work, including a ready-made **WCAG** 3.1.5 Reading Level
+preset, and ships general-purpose: point it at any HTML or text content, not
+just civic sites.
 
-Most readability gates stop at "fail the build." reading-gate also answers
+Most readability gates stop at "fail the build." readable-or-else also answers
 the next question a failing build raises: *okay, so what should this say
 instead?* `--suggest` calls a configurable LLM to draft a plain-language
 rewrite, re-measures it with the same formula used for gating, and only
@@ -11,20 +17,26 @@ surfaces it if the rewrite actually hits the target grade and preserves the
 original's numbers, links, and named entities. It never edits your files —
 suggestions are always a human-reviewed proposal, never an auto-apply.
 
+**Why the name:** the gate fails your build... or else the rewrite mode
+tells you exactly what to say instead.
+
 ## Why grade 7
 
-The flagship preset, `nycsg7`, is the [NYC Web Content Style
+This tool exists because of one standard: the [NYC Web Content Style
 Guide](https://designsystem.nyc.gov/standards/nyc-web-content-style-guide.html)'s
-"Reading level" standard, verbatim:
+"Reading level" rule, quoted verbatim below, which became the flagship
+`nycsg7` preset:
 
 > "Always make your content as simple as you can without losing meaning. Try
 > to simplify your content to a seventh grade reading level or lower. We use
 > the Flesch–Kincaid grade level formula."
 
-reading-gate ships that standard as data (see `reading_gate/presets.py`), not
+readable-or-else ships that standard as data (see `readable_or_else/presets.py`), not
 a hardcoded assumption — every preset carries its source citation inline so
 the tool stays honest about which public standard it's enforcing, and how
-faithfully.
+faithfully. The NYC guide is the tool's origin, not its scope: readable-or-else
+is a general-purpose readability gate for any HTML or text content — see
+"Not civic-specific" below.
 
 ## What this is not
 
@@ -32,7 +44,7 @@ faithfully.
   wrapper over [`textstat`](https://github.com/textstat/textstat) (MIT) —
   Flesch-Kincaid, Flesch Reading Ease, SMOG, Gunning Fog, Coleman-Liau, ARI
   for English; Fernández-Huerta and Szigriszt-Pazos for Spanish. These are
-  peer-reviewed, language-tuned formulas; reading-gate doesn't second-guess
+  peer-reviewed, language-tuned formulas; readable-or-else doesn't second-guess
   the math, only the policy around it (gate/warn/ratchet, presets, the
   rewrite loop).
 - **Not civic-specific.** The NYC standard is the flagship preset because it's
@@ -40,23 +52,25 @@ faithfully.
   alongside it, and `--preset custom --max-grade N` covers everything else.
 - **Not a mass HTML-boilerplate remover.** Extraction is a thin
   script/style/template strip suited to ordinary site markup (see
-  `reading_gate/extract.py`), not a news-article content extractor like
+  `readable_or_else/extract.py`), not a news-article content extractor like
   Mozilla's Readability.js. `--extract dom-rendered` (for SPA-rendered
   content) is a documented stub in v1 — see Limits below.
 
 ## Quickstart
 
 ```bash
-pip install -e .   # or: pip install reading-gate, once published
+pip install -e .   # or: pip install readable-or-else, once published
 
 # Gate a page against the NYC grade-7 standard
-reading-gate check about.html --preset nycsg7
+readable-or-else check about.html --preset nycsg7
+# or the shorter alias:
+ror check about.html --preset nycsg7
 
 # Same thing, machine-readable, for scripting
-reading-gate check about.html --preset nycsg7 --format json
+readable-or-else check about.html --preset nycsg7 --format json
 
 # GitHub Actions inline annotations
-reading-gate check about.html --preset nycsg7 --format gh-annotations
+readable-or-else check about.html --preset nycsg7 --format gh-annotations
 ```
 
 Exit code is `1` if any input fails its gate, `0` otherwise. `warn` mode and
@@ -84,21 +98,21 @@ report.
 
 ```bash
 # Record today's scores as the baseline (run once, commit the file)
-reading-gate baseline about.html data.html --preset nycsg7 -o reading-level-baseline.json
+readable-or-else baseline about.html data.html --preset nycsg7 -o reading-level-baseline.json
 
 # From then on, only fail on regressions
-reading-gate check about.html data.html --preset nycsg7 --mode ratchet \
+readable-or-else check about.html data.html --preset nycsg7 --mode ratchet \
   --baseline reading-level-baseline.json
 ```
 
-`reading-gate baseline` only ever *lowers* a file's recorded grade — it can't
+`readable-or-else baseline` only ever *lowers* a file's recorded grade — it can't
 be used to quietly relax an existing entry. Re-run it whenever a page's score
 improves to lock the gain in.
 
 ### GitHub Actions recipe
 
 ```yaml
-name: reading-gate
+name: readable-or-else
 on: pull_request
 jobs:
   reading-level:
@@ -108,9 +122,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install reading-gate
+      - run: pip install readable-or-else
       - run: |
-          reading-gate check about.html data.html changelog.html \
+          readable-or-else check about.html data.html changelog.html \
             --preset nycsg7 --mode ratchet \
             --baseline reading-level-baseline.json \
             --format gh-annotations
@@ -123,14 +137,14 @@ plumbing.
 ## The rewrite mode (`--suggest`)
 
 ```bash
-export READING_GATE_LLM_BASE="https://api.openai.com/v1"   # any OpenAI-compatible endpoint
-export READING_GATE_LLM_KEY="sk-..."                        # omit for endpoints that don't need auth
-export READING_GATE_LLM_MODEL="gpt-4o-mini"
+export READABLE_OR_ELSE_LLM_BASE="https://api.openai.com/v1"   # any OpenAI-compatible endpoint
+export READABLE_OR_ELSE_LLM_KEY="sk-..."                        # omit for endpoints that don't need auth
+export READABLE_OR_ELSE_LLM_MODEL="gpt-4o-mini"
 
-reading-gate check about.html --preset nycsg7 --suggest --format json
+readable-or-else check about.html --preset nycsg7 --suggest --format json
 ```
 
-`READING_GATE_LLM_BASE` is deliberately provider-agnostic — point it at
+`READABLE_OR_ELSE_LLM_BASE` is deliberately provider-agnostic — point it at
 OpenAI, an Anthropic-compatible shim, or a local proxy. This is a public
 component; it shouldn't assume one vendor.
 
@@ -187,7 +201,7 @@ fake client (`tests/fakes.py`); no test makes a live network call.
 
 ## crol-list: the reference consumer
 
-reading-gate was scoped against crol-list's own pages as its first real
+readable-or-else was scoped against crol-list's own pages as its first real
 corpus. See
 [`docs/consumers/crol-list.md`](docs/consumers/crol-list.md)
 for the exact drop-in: ratchet mode across its six pages, the `nycsg7`
@@ -196,3 +210,11 @@ preset, and a ready-to-paste CI job.
 ## License
 
 MIT.
+
+<!--
+Suggested GitHub repo description (<=120 chars):
+Readability CI gate: Flesch-Kincaid grade-level checks + LLM plain-language rewrites, for accessibility & WCAG.
+
+Suggested GitHub topics:
+readability, accessibility, wcag, plain-language, flesch-kincaid, ci-cd, llm, github-actions
+-->

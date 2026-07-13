@@ -56,7 +56,7 @@ PRESETS: dict[str, Preset] = {
         hard_gate=False,
         note=(
             "WCAG 3.1.5 requires content above lower-secondary reading level to have a "
-            "simplified supplement available, not a hard numeric gate. reading-gate models "
+            "simplified supplement available, not a hard numeric gate. readable-or-else models "
             "this preset as flag-only: it never fails a build (mode is downgraded to warn "
             "behavior regardless of --mode), and the report reminds you to provide a "
             "simplified supplement for flagged passages."

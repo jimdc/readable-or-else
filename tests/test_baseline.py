@@ -3,7 +3,7 @@ import os
 import tempfile
 import unittest
 
-from reading_gate.baseline import (
+from readable_or_else.baseline import (
     BASELINE_VERSION,
     entry_grade,
     load_baseline,

@@ -34,7 +34,7 @@ def extract_dom_rendered(path_or_url: str) -> str:
     one) when SPA measurement is needed.
     """
     raise DomRenderedNotImplemented(
-        "--extract dom-rendered is not implemented in reading-gate v1. "
+        "--extract dom-rendered is not implemented in readable-or-else v1. "
         "Use --extract html for static markup, or pre-extract rendered text "
         "yourself and pass it as a .txt input."
     )

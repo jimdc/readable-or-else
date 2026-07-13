@@ -5,7 +5,7 @@ import os
 import tempfile
 import unittest
 
-from reading_gate.cli import main
+from readable_or_else.cli import main
 
 
 class TestCliCheck(unittest.TestCase):

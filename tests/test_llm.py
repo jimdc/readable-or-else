@@ -1,6 +1,6 @@
 import unittest
 
-from reading_gate.llm import (
+from readable_or_else.llm import (
     LLMConfig,
     RewriteUnavailable,
     check_meaning_preserved,
@@ -93,7 +93,7 @@ class TestLLMConfigFromEnv(unittest.TestCase):
 
         env_backup = {
             k: os.environ.pop(k, None)
-            for k in ("READING_GATE_LLM_BASE", "READING_GATE_LLM_MODEL", "READING_GATE_LLM_KEY")
+            for k in ("READABLE_OR_ELSE_LLM_BASE", "READABLE_OR_ELSE_LLM_MODEL", "READABLE_OR_ELSE_LLM_KEY")
         }
         try:
             with self.assertRaises(RewriteUnavailable):
@@ -106,17 +106,17 @@ class TestLLMConfigFromEnv(unittest.TestCase):
     def test_present_env_builds_config(self):
         import os
 
-        os.environ["READING_GATE_LLM_BASE"] = "https://api.example.com/v1"
-        os.environ["READING_GATE_LLM_MODEL"] = "gpt-4o-mini"
-        os.environ.pop("READING_GATE_LLM_KEY", None)
+        os.environ["READABLE_OR_ELSE_LLM_BASE"] = "https://api.example.com/v1"
+        os.environ["READABLE_OR_ELSE_LLM_MODEL"] = "gpt-4o-mini"
+        os.environ.pop("READABLE_OR_ELSE_LLM_KEY", None)
         try:
             config = LLMConfig.from_env()
             self.assertEqual(config.base_url, "https://api.example.com/v1")
             self.assertEqual(config.model, "gpt-4o-mini")
             self.assertEqual(config.api_key, "")
         finally:
-            os.environ.pop("READING_GATE_LLM_BASE", None)
-            os.environ.pop("READING_GATE_LLM_MODEL", None)
+            os.environ.pop("READABLE_OR_ELSE_LLM_BASE", None)
+            os.environ.pop("READABLE_OR_ELSE_LLM_MODEL", None)
 
 
 if __name__ == "__main__":

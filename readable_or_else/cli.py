@@ -1,4 +1,4 @@
-"""reading-gate CLI."""
+"""readable-or-else CLI."""
 
 import argparse
 import sys
@@ -36,7 +36,7 @@ def resolve_preset(args):
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="reading-gate")
+    parser = argparse.ArgumentParser(prog="readable-or-else")
     sub = parser.add_subparsers(dest="command", required=True)
 
     check = sub.add_parser("check", help="measure and gate files against a preset")

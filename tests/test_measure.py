@@ -1,6 +1,6 @@
 import unittest
 
-from reading_gate.measure import measure
+from readable_or_else.measure import measure
 
 
 class TestMeasureEnglish(unittest.TestCase):

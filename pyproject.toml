@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "reading-gate"
+name = "readable-or-else"
 version = "0.1.0"
 description = "Readability CI gate + LLM rewrite component (Flesch-Kincaid & friends, gate/warn/ratchet, LLM-backed simplification suggestions)"
 readme = "README.md"
@@ -18,7 +18,8 @@ dependencies = [
 dev = ["pytest>=7"]
 
 [project.scripts]
-reading-gate = "reading_gate.cli:main"
+readable-or-else = "readable_or_else.cli:main"
+ror = "readable_or_else.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["reading_gate*"]
+include = ["readable_or_else*"]

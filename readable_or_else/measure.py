@@ -36,7 +36,7 @@ class Measurement:
 def measure(text: str, language: str = "en") -> Measurement:
     if language not in SUPPORTED_LANGUAGES:
         raise ValueError(
-            f"unsupported language {language!r}; reading-gate v1 supports: "
+            f"unsupported language {language!r}; readable-or-else v1 supports: "
             f"{', '.join(SUPPORTED_LANGUAGES)}"
         )
 

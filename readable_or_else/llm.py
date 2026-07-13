@@ -52,13 +52,13 @@ class LLMConfig:
 
     @classmethod
     def from_env(cls) -> "LLMConfig":
-        base_url = os.environ.get("READING_GATE_LLM_BASE")
-        model = os.environ.get("READING_GATE_LLM_MODEL")
-        api_key = os.environ.get("READING_GATE_LLM_KEY", "")
+        base_url = os.environ.get("READABLE_OR_ELSE_LLM_BASE")
+        model = os.environ.get("READABLE_OR_ELSE_LLM_MODEL")
+        api_key = os.environ.get("READABLE_OR_ELSE_LLM_KEY", "")
         if not base_url or not model:
             raise RewriteUnavailable(
-                "READING_GATE_LLM_BASE and READING_GATE_LLM_MODEL must be set in the "
-                "environment to use --suggest/--rewrite (READING_GATE_LLM_KEY is optional, "
+                "READABLE_OR_ELSE_LLM_BASE and READABLE_OR_ELSE_LLM_MODEL must be set in the "
+                "environment to use --suggest/--rewrite (READABLE_OR_ELSE_LLM_KEY is optional, "
                 "for endpoints that don't require auth)."
             )
         return cls(base_url=base_url.rstrip("/"), model=model, api_key=api_key)

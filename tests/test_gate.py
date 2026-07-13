@@ -1,9 +1,9 @@
 import unittest
 
-from reading_gate.baseline import new_baseline, tighten_entry
-from reading_gate.gate import evaluate_file, overall_passed
-from reading_gate.measure import Measurement
-from reading_gate.presets import custom_preset, get_preset
+from readable_or_else.baseline import new_baseline, tighten_entry
+from readable_or_else.gate import evaluate_file, overall_passed
+from readable_or_else.measure import Measurement
+from readable_or_else.presets import custom_preset, get_preset
 
 
 def m(grade, language="en"):

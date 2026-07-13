@@ -1,6 +1,6 @@
 import unittest
 
-from reading_gate.extract import extract_visible_text, extract_dom_rendered, DomRenderedNotImplemented
+from readable_or_else.extract import extract_visible_text, extract_dom_rendered, DomRenderedNotImplemented
 
 
 class TestExtractVisibleText(unittest.TestCase):
