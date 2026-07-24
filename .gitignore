@@ -6,3 +6,12 @@ __pycache__/
 .DS_Store
 *.egg-info/
 .pytest_cache/
+
+# agent/estate scaffolding stays local, never public
+AGENTS.md
+CLAUDE.md
+backlog/
+PAPERCUTS.md
+.scrimignore
+.claude/
+.agents/
